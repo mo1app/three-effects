@@ -13,6 +13,7 @@ import {
   mix,
   length,
   sqrt,
+  texture as tslTexture,
 } from "three/tsl";
 import { gaussianBlur } from "three/addons/tsl/display/GaussianBlurNode.js";
 import { Group } from "three-group-effects";
@@ -58,6 +59,8 @@ const cube = new THREE.Mesh(
 
 const group = new Group();
 group.effectsEnabled = true;
+group.debug = true;
+group.debugColor.set(0x00aa44);
 group.padding = 0.1;
 group.position.y = 0.5;
 group.add(cube);
@@ -75,15 +78,52 @@ const sphereB = new THREE.Mesh(sphereGeo, sphereMat);
 
 const groupA = new Group();
 groupA.effectsEnabled = true;
+groupA.debug = true;
+groupA.debugColor.set(0xff6600);
 groupA.padding = 0.05;
 groupA.add(sphereA);
 scene.add(groupA);
 
 const groupB = new Group();
 groupB.effectsEnabled = true;
+groupB.debug = true;
+groupB.debugColor.set(0xff0066);
 groupB.padding = 0.05;
 groupB.add(sphereB);
 scene.add(groupB);
+
+// ── Debug labels ──────────────────────────────────────────────────────────────
+function makeLabel(text: string, bgHex: number): THREE.Mesh {
+  const H = 80, PAD = 20;
+  const FONT = "bold 34px monospace";
+  // Measure text width first with a temporary canvas
+  const measure = document.createElement("canvas").getContext("2d")!;
+  measure.font = FONT;
+  const W = Math.ceil(measure.measureText(text).width) + PAD * 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = `#${bgHex.toString(16).padStart(6, "0")}`;
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = FONT;
+  ctx.fillText(text, PAD, 54);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthTest: false, side: 2 });
+  mat.colorNode = tslTexture(tex);
+  const h = 50; // label height in screen pixels
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(h * (W / H), h), mat);
+  mesh.renderOrder = 1000;
+  mesh.frustumCulled = false;
+  // Anchor top-right: label hangs left and down from the corner
+  const w = h * (W / H);
+  mesh.position.set(-w / 2, -h / 2, 0);
+  return mesh;
+}
+
+group.debugGroup.add(makeLabel("cube", 0x00aa44));
+groupA.debugGroup.add(makeLabel("sphere A", 0xff6600));
+groupB.debugGroup.add(makeLabel("sphere B", 0xff0066));
 
 // ── Duotone circle-halftone material (sphere groups) ──────────────────────────
 const duotoneDark = uniform(new THREE.Color(0x000000));

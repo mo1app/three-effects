@@ -26,14 +26,17 @@ const _wBL = new Vector3();
 const _wBR = new Vector3();
 const _wTL = new Vector3();
 const _wCenter = new Vector3();
+const _wDebug = new Vector3();
 const _rendererSize = new Vector2();
 const _savedClearColor = new Color();
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
 interface NDCBounds {
-  nMinX: number; nMaxX: number;
-  nMinY: number; nMaxY: number;
+  nMinX: number;
+  nMaxX: number;
+  nMinY: number;
+  nMaxY: number;
   ndcZ: number;
 }
 
@@ -42,6 +45,27 @@ interface NDCBounds {
 export class Group extends ThreeGroup {
   /** Extra space around the projected bounding box, in NDC units (0 = tight fit). */
   padding = 0;
+
+  /** Stroke width of the debug border in screen pixels. */
+  debugStrokePixels = 4;
+
+  /** Color of the debug border. */
+  debugColor = new Color(0x00ff66);
+
+  private _debug = false;
+  private readonly _debugBorder: Mesh[] = [];
+  private _debugBorderMat!: MeshBasicNodeMaterial;
+
+  /** Attach custom debug objects here; anchored to the top-right corner of the billboard. */
+  readonly debugGroup = new ThreeGroup();
+
+  get debug(): boolean {
+    return this._debug;
+  }
+  set debug(v: boolean) {
+    this._debug = v;
+    for (const q of this._debugBorder) q.visible = v;
+  }
 
   private _effectsEnabled = false;
   private readonly _layer: number;
@@ -93,7 +117,7 @@ export class Group extends ThreeGroup {
       this._setContentLayer0(false); // hide from main camera; captured via _layer
     } else {
       Group._registry.delete(this);
-      this._setContentLayer0(true);  // restore normal visibility
+      this._setContentLayer0(true); // restore normal visibility
     }
   }
 
@@ -147,7 +171,28 @@ export class Group extends ThreeGroup {
     this._plane = new Mesh(_geo, this._solidMat);
     this._plane.visible = false; // shown only when effectsEnabled = true
 
-    this._plane.onBeforeRender = (_renderer, _scene, camera) => {
+    // 4 thin quads forming a border frame — thickness driven per-frame in onBeforeRender.
+    this._debugBorderMat = new MeshBasicNodeMaterial({
+      color: this.debugColor,
+      transparent: true,
+      depthWrite: false,
+      depthTest: false,
+      side: 2,
+    });
+    for (let i = 0; i < 4; i++) {
+      const q = new Mesh(_geo, this._debugBorderMat);
+      q.visible = false;
+      q.renderOrder = 999;
+      q.frustumCulled = false;
+      this._debugBorder.push(q);
+      this._plane.add(q);
+    }
+
+    this.debugGroup.position.set(0.5, 0.5, 0.002);
+    this.debugGroup.frustumCulled = false;
+    this._plane.add(this.debugGroup);
+
+    this._plane.onBeforeRender = (renderer, _scene, camera) => {
       // Billboard
       this._plane.quaternion.copy(camera.quaternion);
 
@@ -168,6 +213,9 @@ export class Group extends ThreeGroup {
         .set((nMinX + nMaxX) * 0.5, (nMinY + nMaxY) * 0.5, ndcZ)
         .unproject(camera);
 
+      // Always save world center — needed for wpp whether or not debug is on
+      _wDebug.copy(_wCenter);
+
       this._plane.position.copy(this.worldToLocal(_wCenter));
       this.worldToLocal(_wBL);
       this.worldToLocal(_wBR);
@@ -177,6 +225,41 @@ export class Group extends ThreeGroup {
       this._plane.material = this._effectsEnabled
         ? (this._effectsMaterial ?? this._texMat)
         : this._solidMat;
+
+      // World units per screen pixel at the plane's depth
+      const dist = _wDebug.distanceTo(camera.position);
+      (renderer as any).getSize(_rendererSize);
+      const fovRad = (camera as any).fov * (Math.PI / 180);
+      const wpp =
+        (2 * dist * Math.tan(fovRad * 0.5)) /
+        (_rendererSize.y * (renderer as any).getPixelRatio());
+
+      // Scale debugGroup so 1 local unit = 1 screen pixel, distance-independent
+      this.debugGroup.scale.set(
+        wpp / this._plane.scale.x,
+        wpp / this._plane.scale.y,
+        1,
+      );
+
+      // Update debug border quads to a constant screen-space stroke width
+      if (this._debug && this._debugBorder.length === 4) {
+        (this._debugBorderMat.color as Color).copy(this.debugColor);
+        const stroke = this.debugStrokePixels * wpp;
+
+        // Convert world stroke to plane-local fractions
+        const lx = stroke / this._plane.scale.x;
+        const ly = stroke / this._plane.scale.y;
+
+        const [bottom, top, left, right] = this._debugBorder;
+        bottom.scale.set(1, ly, 1);
+        bottom.position.set(0, -0.5 + ly * 0.5, 0.001);
+        top.scale.set(1, ly, 1);
+        top.position.set(0, 0.5 - ly * 0.5, 0.001);
+        left.scale.set(lx, 1 - ly * 2, 1);
+        left.position.set(-0.5 + lx * 0.5, 0, 0.001);
+        right.scale.set(lx, 1 - ly * 2, 1);
+        right.position.set(0.5 - lx * 0.5, 0, 0.001);
+      }
     };
 
     this.add(this._plane);
@@ -198,11 +281,16 @@ export class Group extends ThreeGroup {
   // ── private helpers ───────────────────────────────────────────────────────
 
   private _computeNDCBounds(camera: Camera): NDCBounds | null {
-    let nMinX = Infinity, nMaxX = -Infinity;
-    let nMinY = Infinity, nMaxY = -Infinity;
-    let wMinX = Infinity, wMaxX = -Infinity;
-    let wMinY = Infinity, wMaxY = -Infinity;
-    let wMinZ = Infinity, wMaxZ = -Infinity;
+    let nMinX = Infinity,
+      nMaxX = -Infinity;
+    let nMinY = Infinity,
+      nMaxY = -Infinity;
+    let wMinX = Infinity,
+      wMaxX = -Infinity;
+    let wMinY = Infinity,
+      wMaxY = -Infinity;
+    let wMinZ = Infinity,
+      wMaxZ = -Infinity;
     let hasVerts = false;
 
     for (const child of this.children) {
@@ -214,12 +302,17 @@ export class Group extends ThreeGroup {
         node.updateWorldMatrix(true, false);
         for (let i = 0, l = pos.count; i < l; i++) {
           _v.fromBufferAttribute(pos, i).applyMatrix4(node.matrixWorld);
-          if (_v.x < wMinX) wMinX = _v.x; if (_v.x > wMaxX) wMaxX = _v.x;
-          if (_v.y < wMinY) wMinY = _v.y; if (_v.y > wMaxY) wMaxY = _v.y;
-          if (_v.z < wMinZ) wMinZ = _v.z; if (_v.z > wMaxZ) wMaxZ = _v.z;
+          if (_v.x < wMinX) wMinX = _v.x;
+          if (_v.x > wMaxX) wMaxX = _v.x;
+          if (_v.y < wMinY) wMinY = _v.y;
+          if (_v.y > wMaxY) wMaxY = _v.y;
+          if (_v.z < wMinZ) wMinZ = _v.z;
+          if (_v.z > wMaxZ) wMaxZ = _v.z;
           _v.project(camera);
-          if (_v.x < nMinX) nMinX = _v.x; if (_v.x > nMaxX) nMaxX = _v.x;
-          if (_v.y < nMinY) nMinY = _v.y; if (_v.y > nMaxY) nMaxY = _v.y;
+          if (_v.x < nMinX) nMinX = _v.x;
+          if (_v.x > nMaxX) nMaxX = _v.x;
+          if (_v.y < nMinY) nMinY = _v.y;
+          if (_v.y > nMaxY) nMaxY = _v.y;
           hasVerts = true;
         }
       });
@@ -227,8 +320,10 @@ export class Group extends ThreeGroup {
 
     if (!hasVerts) return null;
 
-    nMinX -= this.padding; nMaxX += this.padding;
-    nMinY -= this.padding; nMaxY += this.padding;
+    nMinX -= this.padding;
+    nMaxX += this.padding;
+    nMinY -= this.padding;
+    nMaxY += this.padding;
 
     _v.set(
       (wMinX + wMaxX) * 0.5,
