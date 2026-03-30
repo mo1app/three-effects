@@ -13,9 +13,29 @@ import {
   LinearFilter,
   Object3D,
   Camera,
+  Scene,
+  Light,
   Texture,
+  Node,
 } from "three/webgpu";
-import { texture as textureNode, uv, uniform } from "three/tsl";
+import { texture as textureNode, uv, vec2 } from "three/tsl";
+
+// ─── renderer duck-type ───────────────────────────────────────────────────────
+
+interface RendererLike {
+  domElement: HTMLCanvasElement;
+  getSize(target: Vector2): Vector2;
+  getPixelRatio(): number;
+  getViewport(target: Vector4): Vector4;
+  setViewport(x: number | Vector4, y?: number, width?: number, height?: number): void;
+  getRenderTarget(): RenderTarget | null;
+  setRenderTarget(target: RenderTarget | null): void;
+  getClearColor(target: Color): Color;
+  getClearAlpha(): number;
+  setClearColor(color: Color | string | number, alpha?: number): void;
+  clear(): void;
+  render(scene: Scene, camera: Camera): void;
+}
 
 // ─── module-level singletons ─────────────────────────────────────────────────
 
@@ -85,21 +105,21 @@ export class Group extends ThreeGroup {
     transparent: true,
   });
 
-  private readonly _uvMin = uniform(new Vector2(0, 0));
-  private readonly _uvMax = uniform(new Vector2(1, 1));
-
   private _target: RenderTarget | null = null;
   private _targetW = 0;
   private _targetH = 0;
   private readonly _internalCamera = new PerspectiveCamera();
+  private readonly _placeholderTex = new Texture();
+  private _resizeObserver: ResizeObserver | null = null;
 
   // Bounds computed in preRenderEffects, consumed in onBeforeRender
   private _ndcBounds: NDCBounds | null = null;
 
-  // Single texture node: mutable .value + UV-remap baked in. Set once, reused forever.
+  // Single texture node — Y-flipped UV baked in (WebGPU render targets have
+  // V=0 at the top; the plane's V=0 is at the bottom, so we sample 1−v).
   private readonly _mapNode: ReturnType<typeof textureNode>;
 
-  // Extra nodes created via createOffsetSample(); kept in sync with _mapNode on resize.
+  // Extra nodes created via createOffsetSample(); texture ref kept in sync on resize.
   private readonly _secondaryNodes: Array<ReturnType<typeof textureNode>> = [];
 
   // Optional custom material; replaces _texMat when effectsEnabled
@@ -137,23 +157,18 @@ export class Group extends ThreeGroup {
     this._effectsMaterial = mat;
   }
 
-  /** Pre-cropped texture node — use this in a custom `effectsMaterial.colorNode`. */
+  /** Pre-cropped, Y-flipped texture node — use this in a custom `effectsMaterial.colorNode`. */
   get mapNode(): ReturnType<typeof textureNode> {
     return this._mapNode;
   }
 
   /**
-   * Creates a second texture node that samples the render target at
-   * (remappedUV + uvOffsetNode), staying in sync with the primary `mapNode`.
-   * `uvOffsetNode` is in render-target UV space [0..1].
+   * Creates an additional texture node that samples the render target at
+   * (flippedUV + uvOffsetNode). `uvOffsetNode` is in render-target UV space [0..1].
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  createOffsetSample(uvOffsetNode: any): ReturnType<typeof textureNode> {
-    const uvMapped = uv()
-      .mul(this._uvMax.sub(this._uvMin))
-      .add(this._uvMin)
-      .add(uvOffsetNode);
-    const node = textureNode(this._mapNode.value, uvMapped);
+  createOffsetSample(uvOffsetNode: Node): ReturnType<typeof textureNode> {
+    const uvFlipped = uv().mul(vec2(1, -1)).add(vec2(0, 1));
+    const node = textureNode(this._placeholderTex, uvFlipped.add(uvOffsetNode));
     this._secondaryNodes.push(node);
     return node;
   }
@@ -170,10 +185,10 @@ export class Group extends ThreeGroup {
     // renderer.render() calls updateMatrixWorld() on cameras with no parent.
     this._internalCamera.matrixWorldAutoUpdate = false;
 
-    // Build mapNode once: placeholder texture + UV remap driven by uniforms.
-    // Only .value needs updating when the render target is resized.
-    const uvMapped = uv().mul(this._uvMax.sub(this._uvMin)).add(this._uvMin);
-    this._mapNode = textureNode(new Texture(), uvMapped);
+    // Y-flipped UV: WebGPU render targets have V=0 at the top of the image,
+    // but the plane's V=0 is at the bottom, so we sample (u, 1−v).
+    const uvFlipped = uv().mul(vec2(1, -1)).add(vec2(0, 1));
+    this._mapNode = textureNode(this._placeholderTex, uvFlipped);
     this._texMat.colorNode = this._mapNode;
 
     this._plane = new Mesh(_geo, this._solidMat);
@@ -221,7 +236,6 @@ export class Group extends ThreeGroup {
         .set((nMinX + nMaxX) * 0.5, (nMinY + nMaxY) * 0.5, ndcZ)
         .unproject(camera);
 
-      // Always save world center — needed for wpp whether or not debug is on
       _wDebug.copy(_wCenter);
 
       this._plane.position.copy(this.worldToLocal(_wCenter));
@@ -235,12 +249,13 @@ export class Group extends ThreeGroup {
         : this._solidMat;
 
       // World units per screen pixel at the plane's depth
+      const r = renderer as unknown as RendererLike;
       const dist = _wDebug.distanceTo(camera.position);
-      (renderer as any).getSize(_rendererSize);
-      const fovRad = (camera as any).fov * (Math.PI / 180);
+      r.getSize(_rendererSize);
+      const fovRad = (camera as PerspectiveCamera).fov * (Math.PI / 180);
       const wpp =
         (2 * dist * Math.tan(fovRad * 0.5)) /
-        (_rendererSize.y * (renderer as any).getPixelRatio());
+        (_rendererSize.y * r.getPixelRatio());
 
       // Scale debugGroup so 1 local unit = 1 screen pixel, distance-independent
       this.debugGroup.scale.set(
@@ -279,8 +294,11 @@ export class Group extends ThreeGroup {
    * Call once per frame **before** `renderer.render(scene, camera)`.
    * Renders each effectsEnabled group's content to its private render target.
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  static preRenderEffects(renderer: any, scene: any, camera: any): void {
+  static preRenderEffects(
+    renderer: RendererLike,
+    scene: Scene,
+    camera: PerspectiveCamera,
+  ): void {
     for (const group of Group._registry) {
       group._renderToTarget(renderer, scene, camera);
     }
@@ -328,8 +346,12 @@ export class Group extends ThreeGroup {
 
     if (!hasVerts) return null;
 
-    nMinX -= this.padding;
-    nMaxX += this.padding;
+    // padding is expressed in NDC-Y units (proportional to screen height).
+    // NDC X covers `aspect` times more pixels per unit than NDC Y, so divide
+    // the X padding by aspect to keep the visual margin uniform on all sides.
+    const aspect = (camera as PerspectiveCamera).aspect;
+    nMinX -= this.padding / aspect;
+    nMaxX += this.padding / aspect;
     nMinY -= this.padding;
     nMaxY += this.padding;
 
@@ -342,8 +364,21 @@ export class Group extends ThreeGroup {
     return { nMinX, nMaxX, nMinY, nMaxY, ndcZ: _v.z };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private _renderToTarget(renderer: any, scene: any, camera: any): void {
+  private _renderToTarget(
+    renderer: RendererLike,
+    scene: Scene,
+    camera: PerspectiveCamera,
+  ): void {
+    // Lazy resize observer: invalidates the cached target dimensions whenever
+    // the canvas changes size, ensuring a 1-frame-max stale period.
+    if (!this._resizeObserver) {
+      this._resizeObserver = new ResizeObserver(() => {
+        this._targetW = 0;
+        this._targetH = 0;
+      });
+      this._resizeObserver.observe(renderer.domElement);
+    }
+
     const bounds = this._computeNDCBounds(camera);
     this._ndcBounds = bounds;
     if (!bounds) return;
@@ -382,7 +417,7 @@ export class Group extends ThreeGroup {
     // Temporarily grant our layer to scene lights so they illuminate content
     const litObjs: Object3D[] = [];
     scene.traverse((obj: Object3D) => {
-      if ((obj as any).isLight) {
+      if (obj instanceof Light) {
         litObjs.push(obj);
         obj.layers.enable(this._layer);
       }
@@ -430,11 +465,6 @@ export class Group extends ThreeGroup {
 
     // Restore light layers
     for (const obj of litObjs) obj.layers.disable(this._layer);
-
-    // Flip UV Y: WebGPU texture V=0 is the top of the image (NDC Y=+1),
-    // but the plane's UV V=0 is the bottom — so we sample (u, 1-v).
-    this._uvMin.value.set(0, 1);
-    this._uvMax.value.set(1, 0);
   }
 
   // ── overrides ─────────────────────────────────────────────────────────────
@@ -467,9 +497,13 @@ export class Group extends ThreeGroup {
   /** Release GPU resources. Call when the group is permanently removed. */
   dispose(): void {
     Group._registry.delete(this);
+    this._resizeObserver?.disconnect();
+    this._resizeObserver = null;
     this._target?.dispose();
     this._target = null;
+    this._placeholderTex.dispose();
     this._solidMat.dispose();
     this._texMat.dispose();
+    this._debugBorderMat.dispose();
   }
 }
