@@ -39,7 +39,8 @@ interface RendererLike {
 
 // ─── module-level singletons ─────────────────────────────────────────────────
 
-let _layerCounter = 1;
+/** Single Three.js layer shared by all Group instances for effects rendering. */
+const SHARED_LAYER = 1;
 
 const _geo = new PlaneGeometry(1, 1);
 
@@ -137,7 +138,6 @@ export class Group extends ThreeGroup {
   }
 
   private _effectsEnabled = false;
-  private readonly _layer: number;
   private readonly _plane: Mesh;
 
   private readonly _solidMat = new MeshBasicNodeMaterial({
@@ -178,7 +178,7 @@ export class Group extends ThreeGroup {
 
   /**
    * When `true` the group enters **effects mode**:
-   * - Content children are hidden from the main camera (moved to a private layer).
+   * - Content children are hidden from the main camera (moved to `SHARED_LAYER`).
    * - Every frame (via `preRenderEffects`) the content is rendered into a
    *   private bbox-sized `RenderTarget`.
    * - The billboard quad becomes visible and displays the captured texture,
@@ -195,10 +195,12 @@ export class Group extends ThreeGroup {
     this._plane.visible = v;
     if (v) {
       Group._registry.add(this);
-      this._setContentLayer0(false); // hide from main camera; captured via _layer
+      this._setContentLayer(0, false);           // hide from main camera
+      this._setContentLayer(SHARED_LAYER, true); // expose to internal camera
     } else {
       Group._registry.delete(this);
-      this._setContentLayer0(true); // restore normal visibility
+      this._setContentLayer(0, true);             // restore normal visibility
+      this._setContentLayer(SHARED_LAYER, false); // remove from effects layer
     }
   }
 
@@ -259,9 +261,6 @@ export class Group extends ThreeGroup {
 
   constructor() {
     super();
-
-    this._layer = _layerCounter++;
-    if (_layerCounter > 31) _layerCounter = 1;
 
     // Prevent Three.js from overwriting our manually-copied matrixWorld when
     // renderer.render() calls updateMatrixWorld() on cameras with no parent.
@@ -509,12 +508,18 @@ export class Group extends ThreeGroup {
       for (const n of this._secondaryNodes) n.value = this._target.texture;
     }
 
-    // Temporarily grant our layer to scene lights so they illuminate content
+    // Hide every other effectsEnabled group's content from SHARED_LAYER so
+    // this group renders in isolation. Restored after the offscreen pass.
+    for (const other of Group._registry) {
+      if (other !== this) other._setContentLayer(SHARED_LAYER, false);
+    }
+
+    // Temporarily grant SHARED_LAYER to scene lights so they illuminate content.
     const litObjs: Object3D[] = [];
     scene.traverse((obj: Object3D) => {
       if (obj instanceof Light) {
         litObjs.push(obj);
-        obj.layers.enable(this._layer);
+        obj.layers.enable(SHARED_LAYER);
       }
     });
 
@@ -532,7 +537,7 @@ export class Group extends ThreeGroup {
     // setViewOffset zooms the projection into the bbox pixel region,
     // filling the cropW×cropH target at full resolution.
     ic.setViewOffset(fullW, fullH, pxMinX, pxMinY, cropW, cropH);
-    ic.layers.mask = 1 << this._layer;
+    ic.layers.mask = 1 << SHARED_LAYER;
 
     const savedTarget = renderer.getRenderTarget();
     const savedBackground = scene.background;
@@ -558,39 +563,58 @@ export class Group extends ThreeGroup {
     renderer.setClearColor(_savedClearColor, savedClearAlpha);
     scene.background = savedBackground;
 
-    // Restore light layers
-    for (const obj of litObjs) obj.layers.disable(this._layer);
+    // Restore lights and sibling groups
+    for (const obj of litObjs) obj.layers.disable(SHARED_LAYER);
+    for (const other of Group._registry) {
+      if (other !== this) other._setContentLayer(SHARED_LAYER, true);
+    }
   }
 
   // ── overrides ─────────────────────────────────────────────────────────────
 
-  /** Toggle layer 0 on all content children (not the plane). */
-  private _setContentLayer0(enabled: boolean): void {
+  /** Toggle a layer on all content children (not the plane). */
+  private _setContentLayer(layer: number, enabled: boolean): void {
     for (const child of this.children) {
       if (child === this._plane) continue;
       child.traverse((node) => {
-        if (enabled) node.layers.enable(0);
-        else node.layers.disable(0);
+        if (enabled) node.layers.enable(layer);
+        else node.layers.disable(layer);
       });
     }
   }
 
   /**
-   * Adds one or more objects to this group and assigns them to the private
-   * render layer so they are captured by `preRenderEffects`.
-   *
-   * If `effectsEnabled` is already `true` at the time of the call, the
-   * objects are also removed from layer 0 so they stay hidden from the main
-   * camera until effects are disabled.
+   * Adds one or more objects to this group. If `effectsEnabled` is already
+   * `true`, the objects are immediately placed on `SHARED_LAYER` and removed
+   * from layer 0 so they are captured by `preRenderEffects` and hidden from
+   * the main camera.
    */
   override add(...objects: Object3D[]): this {
     super.add(...objects);
     for (const obj of objects) {
       if (obj === this._plane) continue;
+      if (this._effectsEnabled) {
+        obj.traverse((child) => {
+          child.layers.disable(0);
+          child.layers.enable(SHARED_LAYER);
+        });
+      }
+    }
+    return this;
+  }
+
+  /**
+   * Removes one or more objects from this group. If `effectsEnabled` is
+   * `true`, the removed objects are restored to layer 0 and removed from
+   * `SHARED_LAYER` so they become visible to the main camera again.
+   */
+  override remove(...objects: Object3D[]): this {
+    super.remove(...objects);
+    for (const obj of objects) {
+      if (obj === this._plane) continue;
       obj.traverse((child) => {
-        child.layers.enable(this._layer);
-        // If effects are already active, keep content off layer 0.
-        if (this._effectsEnabled) child.layers.disable(0);
+        child.layers.enable(0);
+        child.layers.disable(SHARED_LAYER);
       });
     }
     return this;
