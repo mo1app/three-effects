@@ -1,4 +1,5 @@
 import * as THREE from "three/webgpu";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { Group } from "three-group-effects";
 
 const root = document.querySelector("#app")!;
@@ -18,6 +19,10 @@ const camera = new THREE.PerspectiveCamera(
   100,
 );
 camera.position.set(0, 0.6, 3.8);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.target.set(0, 0.5, 0);
 
 const key = new THREE.DirectionalLight(0xffffff, 1.15);
 key.position.set(2.5, 4, 3);
@@ -54,6 +59,7 @@ renderer.setAnimationLoop((time) => {
   const t = time * 0.001;
   cube.rotation.x = t * 0.45;
   cube.rotation.y = t * 0.65;
+  controls.update();
   group.updateCamera(camera);
   renderer.render(scene, camera);
 });
