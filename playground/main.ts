@@ -126,11 +126,13 @@ groupA.debugGroup.add(makeLabel("sphere A", 0xff6600));
 groupB.debugGroup.add(makeLabel("sphere B", 0xff0066));
 
 // ── Duotone circle-halftone material (sphere groups) ──────────────────────────
-const duotoneDark = uniform(new THREE.Color(0x000000));
+const duotoneDark = uniform(new THREE.Color().setRGB(0 / 255, 36 / 255, 255 / 255));
 const duotoneLight = uniform(new THREE.Color(0xffffff));
 const dotSize = uniform(15.0);
 const lumMin = uniform(0.1);
 const lumMax = uniform(0.4);
+const solidBlurRadius = uniform(4.0);
+const alphaExpand = uniform(0.5);
 
 // Shared halftone cell geometry (same for both groups)
 const cellPos = screenCoordinate.xy.div(dotSize).fract().mul(2.0).sub(1.0);
@@ -139,6 +141,19 @@ const edgeWidth = float(2.0).div(dotSize);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeDitherMat(srcNode: any) {
+  // ── solid base: blurred source mapped to duotone ──
+  const blurred = gaussianBlur(srcNode, solidBlurRadius, 8);
+  const blurredLum = blurred.r
+    .mul(0.2126)
+    .add(blurred.g.mul(0.7152))
+    .add(blurred.b.mul(0.0722));
+  const blurredRemapped = blurredLum
+    .sub(lumMin)
+    .div(lumMax.sub(lumMin))
+    .clamp(0.0, 1.0);
+  const solidBase = mix(vec3(duotoneDark), vec3(duotoneLight), blurredRemapped);
+
+  // ── sharp dot pass ──
   const lum = srcNode.r
     .mul(0.2126)
     .add(srcNode.g.mul(0.7152))
@@ -146,19 +161,24 @@ function makeDitherMat(srcNode: any) {
   const remapped = lum.sub(lumMin).div(lumMax.sub(lumMin)).clamp(0.0, 1.0);
   const r = sqrt(remapped);
   const visible = step(float(0.001), remapped);
+  // Expanded alpha: remaps blurred.a through smoothstep so the halo grows.
+  const expandedAlpha = smoothstep(float(0.0), alphaExpand, blurred.a);
+
+  // Dots are masked by expandedAlpha so they follow the same soft boundary
+  // as the blurred solid — bleeding slightly outside the hard content edge.
   const mask = float(1.0)
     .sub(smoothstep(r.sub(edgeWidth), r.add(edgeWidth), dist))
     .mul(visible)
-    .mul(srcNode.a);
+    .mul(expandedAlpha);
+  const dotColor = mix(vec3(duotoneDark), vec3(duotoneLight), mask);
+
+  // ── composite: dots on top of blurred solid ──
   const mat = new THREE.MeshBasicNodeMaterial({
     transparent: true,
     depthWrite: true,
     side: 2,
   });
-  mat.colorNode = vec4(
-    mix(vec3(duotoneDark), vec3(duotoneLight), mask),
-    srcNode.a,
-  );
+  mat.colorNode = vec4(mix(solidBase, dotColor, mask), expandedAlpha);
   return mat;
 }
 
@@ -343,7 +363,7 @@ f2.addBinding(sphereProxy, "padding", {
   groupB.padding = value;
 });
 const duotoneProxy = {
-  dark: { r: 0, g: 0, b: 0 },
+  dark: { r: 0, g: 36, b: 255 },
   light: { r: 255, g: 255, b: 255 },
 };
 f2.addBinding(duotoneProxy, "dark", {
@@ -391,6 +411,23 @@ f2.addBinding(lumRangeProxy, "max", {
   step: 0.01,
 }).on("change", ({ value }) => {
   lumMax.value = value;
+});
+const solidBlurProxy = { radius: 4.0, expand: 0.5 };
+f2.addBinding(solidBlurProxy, "radius", {
+  label: "solid blur radius",
+  min: 0,
+  max: 20,
+  step: 0.5,
+}).on("change", ({ value }) => {
+  solidBlurRadius.value = value;
+});
+f2.addBinding(solidBlurProxy, "expand", {
+  label: "alpha expand",
+  min: 0.01,
+  max: 1.0,
+  step: 0.01,
+}).on("change", ({ value }) => {
+  alphaExpand.value = value;
 });
 
 function onResize() {
