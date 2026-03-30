@@ -1,5 +1,5 @@
 import * as THREE from "three/webgpu";
-import { attachExample } from "three-group-effects";
+import { Group } from "three-group-effects";
 
 const root = document.querySelector("#app")!;
 
@@ -35,10 +35,11 @@ const cube = new THREE.Mesh(
     roughness: 0.42,
   }),
 );
-cube.position.y = 0.5;
-scene.add(cube);
 
-attachExample(scene);
+const group = new Group();
+group.position.y = 0.5;
+group.add(cube);
+scene.add(group);
 
 function onResize() {
   const w = window.innerWidth;
@@ -53,5 +54,6 @@ renderer.setAnimationLoop((time) => {
   const t = time * 0.001;
   cube.rotation.x = t * 0.45;
   cube.rotation.y = t * 0.65;
+  group.updateCamera(camera);
   renderer.render(scene, camera);
 });
