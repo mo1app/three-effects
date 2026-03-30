@@ -27,8 +27,9 @@ export class Group extends ThreeGroup {
 
     this._plane = new Mesh(
       _geo,
-      new MeshBasicNodeMaterial({ color: new Color(0xff2020), side: 2 }),
+      new MeshBasicNodeMaterial({ color: new Color(0xff2020), side: 2, depthWrite: false }),
     );
+    this._plane.renderOrder = -1;
 
     this._plane.onBeforeRender = (_renderer, _scene, camera) => {
       // Billboard — copy camera orientation so the plane always faces it
