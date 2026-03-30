@@ -1,9 +1,9 @@
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
 import { attachExample } from "three-group-effects";
 
 const root = document.querySelector("#app")!;
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGPURenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 root.appendChild(renderer.domElement);
@@ -29,8 +29,8 @@ scene.add(grid);
 
 const cube = new THREE.Mesh(
   new THREE.BoxGeometry(1, 1, 1),
-  new THREE.MeshStandardMaterial({
-    color: 0x6ae3ff,
+  new THREE.MeshStandardNodeMaterial({
+    color: new THREE.Color(0x6ae3ff),
     metalness: 0.25,
     roughness: 0.42,
   }),
@@ -49,11 +49,9 @@ function onResize() {
 }
 window.addEventListener("resize", onResize);
 
-function tick(time: number) {
+renderer.setAnimationLoop((time) => {
   const t = time * 0.001;
   cube.rotation.x = t * 0.45;
   cube.rotation.y = t * 0.65;
   renderer.render(scene, camera);
-  requestAnimationFrame(tick);
-}
-requestAnimationFrame(tick);
+});
