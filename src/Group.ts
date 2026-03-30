@@ -3,9 +3,11 @@ import {
   Mesh,
   PlaneGeometry,
   MeshBasicNodeMaterial,
+  PerspectiveCamera,
   Color,
   Vector2,
   Vector3,
+  Vector4,
   RenderTarget,
   HalfFloatType,
   LinearFilter,
@@ -29,6 +31,7 @@ const _wCenter = new Vector3();
 const _wDebug = new Vector3();
 const _rendererSize = new Vector2();
 const _savedClearColor = new Color();
+const _savedViewport = new Vector4();
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
@@ -88,6 +91,7 @@ export class Group extends ThreeGroup {
   private _target: RenderTarget | null = null;
   private _targetW = 0;
   private _targetH = 0;
+  private readonly _internalCamera = new PerspectiveCamera();
 
   // Bounds computed in preRenderEffects, consumed in onBeforeRender
   private _ndcBounds: NDCBounds | null = null;
@@ -161,6 +165,10 @@ export class Group extends ThreeGroup {
 
     this._layer = _layerCounter++;
     if (_layerCounter > 31) _layerCounter = 1;
+
+    // Prevent Three.js from overwriting our manually-copied matrixWorld when
+    // renderer.render() calls updateMatrixWorld() on cameras with no parent.
+    this._internalCamera.matrixWorldAutoUpdate = false;
 
     // Build mapNode once: placeholder texture + UV remap driven by uniforms.
     // Only .value needs updating when the render target is resized.
@@ -342,22 +350,31 @@ export class Group extends ThreeGroup {
 
     const { nMinX, nMaxX, nMinY, nMaxY } = bounds;
 
-    // Resize render target to match physical viewport pixels
+    // Full physical pixel dimensions of the renderer
     renderer.getSize(_rendererSize);
-    const w = Math.round(_rendererSize.x * renderer.getPixelRatio());
-    const h = Math.round(_rendererSize.y * renderer.getPixelRatio());
+    const dpr = renderer.getPixelRatio();
+    const fullW = Math.round(_rendererSize.x * dpr);
+    const fullH = Math.round(_rendererSize.y * dpr);
 
-    if (w !== this._targetW || h !== this._targetH) {
+    // Pixel bounding box of the content (screen Y is top-down)
+    const pxMinX = Math.floor((nMinX + 1) * 0.5 * fullW);
+    const pxMaxX = Math.ceil((nMaxX + 1) * 0.5 * fullW);
+    const pxMinY = Math.floor((1 - nMaxY) * 0.5 * fullH);
+    const pxMaxY = Math.ceil((1 - nMinY) * 0.5 * fullH);
+    const cropW = Math.max(1, pxMaxX - pxMinX);
+    const cropH = Math.max(1, pxMaxY - pxMinY);
+
+    // Allocate a cropped render target sized to the bbox — not full-screen
+    if (cropW !== this._targetW || cropH !== this._targetH) {
       this._target?.dispose();
-      this._target = new RenderTarget(w, h, {
+      this._target = new RenderTarget(cropW, cropH, {
         minFilter: LinearFilter,
         magFilter: LinearFilter,
         type: HalfFloatType,
       });
-      this._targetW = w;
-      this._targetH = h;
+      this._targetW = cropW;
+      this._targetH = cropH;
 
-      // Update the texture reference in all nodes; UV remap uniforms handle the rest.
       this._mapNode.value = this._target.texture;
       for (const n of this._secondaryNodes) n.value = this._target.texture;
     }
@@ -371,37 +388,53 @@ export class Group extends ThreeGroup {
       }
     });
 
-    // Render only this group's layer to the target (plane is layer 0 only → not rendered).
-    // Clear to fully transparent so the quad has no background bleed.
-    const savedMask = camera.layers.mask;
+    // Sync the internal camera from the main camera so the scene renders from
+    // the same viewpoint. Main camera is never modified — no restore needed.
+    const ic = this._internalCamera;
+    ic.fov    = camera.fov;
+    ic.aspect = camera.aspect;
+    ic.near   = camera.near;
+    ic.far    = camera.far;
+    ic.zoom   = camera.zoom ?? 1;
+    ic.view   = camera.view ? { ...camera.view } : null;
+    ic.matrixWorld.copy(camera.matrixWorld);
+    ic.matrixWorldInverse.copy(camera.matrixWorldInverse);
+    // setViewOffset zooms the projection into the bbox pixel region,
+    // filling the cropW×cropH target at full resolution.
+    ic.setViewOffset(fullW, fullH, pxMinX, pxMinY, cropW, cropH);
+    ic.layers.mask = 1 << this._layer;
+
     const savedTarget = renderer.getRenderTarget();
     const savedBackground = scene.background;
     renderer.getClearColor(_savedClearColor);
     const savedClearAlpha = renderer.getClearAlpha();
 
     scene.background = null;
-    camera.layers.mask = 1 << this._layer;
     renderer.setClearColor(0x000000, 0);
+
+    // renderer.setViewport takes LOGICAL pixels (Three.js multiplies by
+    // pixelRatio internally). Save the current logical viewport so we can
+    // restore it exactly after the offscreen pass.
+    renderer.getViewport(_savedViewport);
+    renderer.setViewport(0, 0, cropW / dpr, cropH / dpr);
+
     renderer.setRenderTarget(this._target);
     renderer.clear();
-    renderer.render(scene, camera);
+    renderer.render(scene, ic);
 
+    // Restore renderer state
     renderer.setRenderTarget(savedTarget);
+    renderer.setViewport(_savedViewport);
     renderer.setClearColor(_savedClearColor, savedClearAlpha);
     scene.background = savedBackground;
-    camera.layers.mask = savedMask;
 
     // Restore light layers
     for (const obj of litObjs) obj.layers.disable(this._layer);
 
-    // NDC → UV conversion.
-    // X: (ndcX + 1) / 2  — left→right unchanged.
-    // Y: (1 − ndcY) / 2  — WebGPU render targets have V=0 at the top of the image.
-    //    plane_V=0 (bottom) must sample the bottom of the content (nMinY),
-    //    plane_V=1 (top)    must sample the top   of the content (nMaxY),
-    //    so uvMin.y uses nMinY and uvMax.y uses nMaxY (note: uvMin.y > uvMax.y).
-    this._uvMin.value.set((nMinX + 1) * 0.5, (1 - nMinY) * 0.5);
-    this._uvMax.value.set((nMaxX + 1) * 0.5, (1 - nMaxY) * 0.5);
+    // Flip UV Y: WebGPU texture V=0 is the top of the image (NDC Y=+1),
+    // but the plane's UV V=0 is the bottom — so we sample (u, 1-v).
+    this._uvMin.value.set(0, 1);
+    this._uvMax.value.set(1, 0);
   }
 
   // ── overrides ─────────────────────────────────────────────────────────────
