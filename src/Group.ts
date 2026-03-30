@@ -65,23 +65,69 @@ interface NDCBounds {
 
 // ─── Group ───────────────────────────────────────────────────────────────────
 
+/**
+ * A `THREE.Group` that automatically fits a billboard quad to the projected
+ * 2-D screen-space bounding box of its content children.
+ *
+ * When `effectsEnabled` is `true` the content is rendered to a private,
+ * bbox-sized `RenderTarget` each frame and the billboard displays the result.
+ * A custom TSL material can be supplied via `effectsMaterial`; it always
+ * receives the captured texture through `mapNode`.
+ *
+ * **Minimal usage**
+ * ```ts
+ * const group = new Group();
+ * group.effectsEnabled = true;
+ * group.effectsMaterial = myTslMaterial; // colorNode uses group.mapNode
+ * group.add(myMesh);
+ * scene.add(group);
+ *
+ * // In your render loop — must come before renderer.render():
+ * Group.preRenderEffects(renderer, scene, camera);
+ * renderer.render(scene, camera);
+ * ```
+ */
 export class Group extends ThreeGroup {
-  /** Extra space around the projected bounding box, in NDC units (0 = tight fit). */
+  /**
+   * Uniform padding applied around the projected bounding box on all sides.
+   * Expressed as a fraction of the screen height (NDC-Y units), so the visual
+   * margin stays proportional regardless of aspect ratio.
+   * @default 0
+   */
   padding = 0;
 
-  /** Stroke width of the debug border in screen pixels. */
+  /**
+   * Width of the debug border in screen pixels (distance-independent).
+   * Only visible when `debug` is `true`.
+   * @default 4
+   */
   debugStrokePixels = 4;
 
-  /** Color of the debug border. */
+  /**
+   * Color of the debug border and the default tint for labels added to
+   * `debugGroup`. Can be changed at any time.
+   * @default 0x00ff66
+   */
   debugColor = new Color(0x00ff66);
 
   private _debug = false;
   private readonly _debugBorder: Mesh[] = [];
   private _debugBorderMat!: MeshBasicNodeMaterial;
 
-  /** Attach custom debug objects here; anchored to the top-right corner of the billboard. */
+  /**
+   * A `THREE.Group` anchored to the **top-right corner** of the billboard quad
+   * in screen space. Add custom `Object3D`s here for debug annotations.
+   *
+   * The group's scale is updated every frame so that **1 local unit equals
+   * 1 screen pixel**, independent of camera distance. Place children at
+   * pixel-sized offsets for predictable screen-space sizing.
+   */
   readonly debugGroup = new ThreeGroup();
 
+  /**
+   * Show or hide the screen-space debug border around the billboard quad.
+   * Border color is driven by `debugColor`; thickness by `debugStrokePixels`.
+   */
   get debug(): boolean {
     return this._debug;
   }
@@ -130,6 +176,17 @@ export class Group extends ThreeGroup {
 
   // ── effectsEnabled getter/setter ──────────────────────────────────────────
 
+  /**
+   * When `true` the group enters **effects mode**:
+   * - Content children are hidden from the main camera (moved to a private layer).
+   * - Every frame (via `preRenderEffects`) the content is rendered into a
+   *   private bbox-sized `RenderTarget`.
+   * - The billboard quad becomes visible and displays the captured texture,
+   *   optionally processed by `effectsMaterial`.
+   *
+   * When `false` the billboard is hidden and all content renders normally.
+   * @default false
+   */
   get effectsEnabled(): boolean {
     return this._effectsEnabled;
   }
@@ -146,9 +203,20 @@ export class Group extends ThreeGroup {
   }
 
   /**
-   * Optional custom TSL material for the billboard.
-   * Use `this.mapNode` in its `colorNode` to sample the captured texture.
-   * Should have `transparent: true`, `depthWrite: true`, `side: 2`.
+   * Optional custom TSL material applied to the billboard quad when
+   * `effectsEnabled` is `true`. Falls back to a plain textured material if
+   * not set.
+   *
+   * The material receives the captured render-target texture through
+   * `mapNode` (and any nodes created via `createOffsetSample`). It should be
+   * created with `transparent: true`, `depthWrite: true`, `side: 2`.
+   *
+   * @example
+   * ```ts
+   * const mat = new MeshBasicNodeMaterial({ transparent: true, depthWrite: true, side: 2 });
+   * mat.colorNode = group.mapNode; // sample the captured texture
+   * group.effectsMaterial = mat;
+   * ```
    */
   get effectsMaterial(): MeshBasicNodeMaterial | null {
     return this._effectsMaterial;
@@ -157,14 +225,28 @@ export class Group extends ThreeGroup {
     this._effectsMaterial = mat;
   }
 
-  /** Pre-cropped, Y-flipped texture node — use this in a custom `effectsMaterial.colorNode`. */
+  /**
+   * A pre-built TSL texture node that samples the group's private render
+   * target with Y-axis corrected UVs. Use this as (part of) the `colorNode`
+   * of your `effectsMaterial`.
+   *
+   * The node's underlying texture reference is automatically updated whenever
+   * the render target is resized.
+   */
   get mapNode(): ReturnType<typeof textureNode> {
     return this._mapNode;
   }
 
   /**
-   * Creates an additional texture node that samples the render target at
-   * (flippedUV + uvOffsetNode). `uvOffsetNode` is in render-target UV space [0..1].
+   * Creates an additional TSL texture node that samples the render target at
+   * `flippedUV + uvOffsetNode`. Useful for effects that need to read the
+   * texture at multiple offset positions (e.g. drop shadows, blur kernels).
+   *
+   * The returned node shares the same underlying texture as `mapNode` and is
+   * kept in sync when the render target is resized.
+   *
+   * @param uvOffsetNode - A vec2 TSL node in render-target UV space `[0..1]`.
+   * @returns A texture node sampling at the offset UV.
    */
   createOffsetSample(uvOffsetNode: Node): ReturnType<typeof textureNode> {
     const uvFlipped = uv().mul(vec2(1, -1)).add(vec2(0, 1));
@@ -291,8 +373,21 @@ export class Group extends ThreeGroup {
   // ── static API ────────────────────────────────────────────────────────────
 
   /**
-   * Call once per frame **before** `renderer.render(scene, camera)`.
-   * Renders each effectsEnabled group's content to its private render target.
+   * Renders every registered (i.e. `effectsEnabled = true`) group's content
+   * into its private render target for this frame.
+   *
+   * **Must be called once per frame, before `renderer.render(scene, camera)`.**
+   *
+   * ```ts
+   * renderer.setAnimationLoop(() => {
+   *   Group.preRenderEffects(renderer, scene, camera);
+   *   renderer.render(scene, camera);
+   * });
+   * ```
+   *
+   * @param renderer - The active WebGPU renderer.
+   * @param scene    - The scene being rendered.
+   * @param camera   - The main perspective camera.
    */
   static preRenderEffects(
     renderer: RendererLike,
@@ -480,7 +575,14 @@ export class Group extends ThreeGroup {
     }
   }
 
-  /** Enable the group's private render layer on newly added content. */
+  /**
+   * Adds one or more objects to this group and assigns them to the private
+   * render layer so they are captured by `preRenderEffects`.
+   *
+   * If `effectsEnabled` is already `true` at the time of the call, the
+   * objects are also removed from layer 0 so they stay hidden from the main
+   * camera until effects are disabled.
+   */
   override add(...objects: Object3D[]): this {
     super.add(...objects);
     for (const obj of objects) {
@@ -494,7 +596,14 @@ export class Group extends ThreeGroup {
     return this;
   }
 
-  /** Release GPU resources. Call when the group is permanently removed. */
+  /**
+   * Releases all GPU resources owned by this group (render target, materials,
+   * placeholder texture) and disconnects the canvas resize observer.
+   *
+   * Call this when the group is permanently removed from the scene. Children
+   * added via `add()` are **not** disposed — the caller is responsible for
+   * cleaning up their own geometries and materials.
+   */
   dispose(): void {
     Group._registry.delete(this);
     this._resizeObserver?.disconnect();
