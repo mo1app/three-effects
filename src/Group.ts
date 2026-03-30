@@ -61,6 +61,8 @@ interface NDCBounds {
   nMaxX: number;
   nMinY: number;
   nMaxY: number;
+  nMinZ: number;
+  nMaxZ: number;
   ndcZ: number;
 }
 
@@ -401,16 +403,12 @@ export class Group extends ThreeGroup {
   // ── private helpers ───────────────────────────────────────────────────────
 
   private _computeNDCBounds(camera: Camera): NDCBounds | null {
-    let nMinX = Infinity,
-      nMaxX = -Infinity;
-    let nMinY = Infinity,
-      nMaxY = -Infinity;
-    let wMinX = Infinity,
-      wMaxX = -Infinity;
-    let wMinY = Infinity,
-      wMaxY = -Infinity;
-    let wMinZ = Infinity,
-      wMaxZ = -Infinity;
+    let nMinX = Infinity,  nMaxX = -Infinity;
+    let nMinY = Infinity,  nMaxY = -Infinity;
+    let nMinZ = Infinity,  nMaxZ = -Infinity;
+    let wMinX = Infinity,  wMaxX = -Infinity;
+    let wMinY = Infinity,  wMaxY = -Infinity;
+    let wMinZ = Infinity,  wMaxZ = -Infinity;
     let hasVerts = false;
 
     for (const child of this.children) {
@@ -433,6 +431,8 @@ export class Group extends ThreeGroup {
           if (_v.x > nMaxX) nMaxX = _v.x;
           if (_v.y < nMinY) nMinY = _v.y;
           if (_v.y > nMaxY) nMaxY = _v.y;
+          if (_v.z < nMinZ) nMinZ = _v.z;
+          if (_v.z > nMaxZ) nMaxZ = _v.z;
           hasVerts = true;
         }
       });
@@ -455,7 +455,7 @@ export class Group extends ThreeGroup {
       (wMinZ + wMaxZ) * 0.5,
     ).project(camera);
 
-    return { nMinX, nMaxX, nMinY, nMaxY, ndcZ: _v.z };
+    return { nMinX, nMaxX, nMinY, nMaxY, nMinZ, nMaxZ, ndcZ: _v.z };
   }
 
   private _renderToTarget(
@@ -475,7 +475,22 @@ export class Group extends ThreeGroup {
 
     const bounds = this._computeNDCBounds(camera);
     this._ndcBounds = bounds;
-    if (!bounds) return;
+
+    // Frustum cull: hide the billboard if the content bbox is entirely outside
+    // NDC space. nMinZ > 1 catches both behind-the-camera and beyond-far-plane
+    // cases — perspective projection maps those vertices to NDC Z > 1 because
+    // the clip-space W is negative, flipping the divide and corrupting X/Y too.
+    const outsideFrustum =
+      !bounds ||
+      bounds.nMaxX < -1 || bounds.nMinX > 1 ||
+      bounds.nMaxY < -1 || bounds.nMinY > 1 ||
+      bounds.nMinZ >  1 || bounds.nMaxZ < -1;
+
+    if (outsideFrustum) {
+      this._plane.visible = false;
+      return;
+    }
+    this._plane.visible = true;
 
     const { nMinX, nMaxX, nMinY, nMaxY } = bounds;
 
