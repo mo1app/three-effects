@@ -46,6 +46,22 @@ group.position.y = 0.5;
 group.add(cube);
 scene.add(group);
 
+// Second group — two orbiting spheres
+const sphereMat = new THREE.MeshStandardNodeMaterial({
+  color: new THREE.Color(0xffaa33),
+  metalness: 0.1,
+  roughness: 0.55,
+});
+const sphereGeo = new THREE.SphereGeometry(0.28, 32, 32);
+const sphereA = new THREE.Mesh(sphereGeo, sphereMat);
+const sphereB = new THREE.Mesh(sphereGeo, sphereMat);
+
+const group2 = new Group();
+group2.padding = 0.05;
+group2.position.set(2.4, 0.8, 0);
+group2.add(sphereA, sphereB);
+scene.add(group2);
+
 function onResize() {
   const w = window.innerWidth;
   const h = window.innerHeight;
@@ -57,8 +73,14 @@ window.addEventListener("resize", onResize);
 
 renderer.setAnimationLoop((time) => {
   const t = time * 0.001;
+
   cube.rotation.x = t * 0.45;
   cube.rotation.y = t * 0.65;
+
+  // Spheres orbit around the group2 center at different speeds and radii
+  sphereA.position.set(Math.cos(t * 1.1) * 0.55, Math.sin(t * 0.7) * 0.3, Math.sin(t * 1.1) * 0.55);
+  sphereB.position.set(Math.cos(t * 0.8 + Math.PI) * 0.7, Math.sin(t * 1.3 + 1) * 0.4, Math.sin(t * 0.8 + Math.PI) * 0.7);
+
   controls.update();
   renderer.render(scene, camera);
 });

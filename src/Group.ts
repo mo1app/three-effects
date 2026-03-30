@@ -4,7 +4,6 @@ import {
   PlaneGeometry,
   MeshBasicNodeMaterial,
   Color,
-  Box3,
   Vector3,
 } from "three/webgpu";
 
@@ -12,7 +11,6 @@ import {
 const _geo = new PlaneGeometry(1, 1);
 
 // Module-level temporaries to avoid per-frame allocations
-const _box = new Box3();
 const _v = new Vector3();
 const _wBL = new Vector3();
 const _wBR = new Vector3();
@@ -20,6 +18,9 @@ const _wTL = new Vector3();
 const _wCenter = new Vector3();
 
 export class Group extends ThreeGroup {
+  /** Extra space around the projected bounding box, in NDC units (0 = tight fit). */
+  padding = 0;
+
   private readonly _plane: Mesh;
 
   constructor() {
@@ -35,33 +36,54 @@ export class Group extends ThreeGroup {
       // Billboard — copy camera orientation so the plane always faces it
       this._plane.quaternion.copy(camera.quaternion);
 
-      // Compute world-space bounding box of all siblings (skip the plane itself)
-      _box.makeEmpty();
+      // Project every actual vertex of every sibling mesh directly to NDC.
+      // This avoids the double-approximation of first computing a world AABB
+      // and then projecting its corners (which adds slack for rotated objects).
+      let nMinX = Infinity, nMaxX = -Infinity;
+      let nMinY = Infinity, nMaxY = -Infinity;
+      let wMinX = Infinity, wMaxX = -Infinity;
+      let wMinY = Infinity, wMaxY = -Infinity;
+      let wMinZ = Infinity, wMaxZ = -Infinity;
+      let hasVerts = false;
+
       for (const child of this.children) {
-        if (child !== this._plane) _box.expandByObject(child, true);
+        if (child === this._plane) continue;
+        child.traverse((obj) => {
+          if (!(obj instanceof Mesh)) return;
+          const pos = (obj as Mesh).geometry?.attributes?.position;
+          if (!pos) return;
+          obj.updateWorldMatrix(true, false);
+          for (let i = 0, l = pos.count; i < l; i++) {
+            _v.fromBufferAttribute(pos, i).applyMatrix4(obj.matrixWorld);
+            if (_v.x < wMinX) wMinX = _v.x;
+            if (_v.x > wMaxX) wMaxX = _v.x;
+            if (_v.y < wMinY) wMinY = _v.y;
+            if (_v.y > wMaxY) wMaxY = _v.y;
+            if (_v.z < wMinZ) wMinZ = _v.z;
+            if (_v.z > wMaxZ) wMaxZ = _v.z;
+            _v.project(camera);
+            if (_v.x < nMinX) nMinX = _v.x;
+            if (_v.x > nMaxX) nMaxX = _v.x;
+            if (_v.y < nMinY) nMinY = _v.y;
+            if (_v.y > nMaxY) nMaxY = _v.y;
+            hasVerts = true;
+          }
+        });
       }
-      if (_box.isEmpty()) return;
 
-      // Project all 8 corners of the box to NDC and track the 2D extents
-      let nMinX = Infinity,
-        nMaxX = -Infinity,
-        nMinY = Infinity,
-        nMaxY = -Infinity;
-      const { min, max } = _box;
-      for (let i = 0; i < 8; i++) {
-        _v.set(
-          i & 1 ? max.x : min.x,
-          i & 2 ? max.y : min.y,
-          i & 4 ? max.z : min.z,
-        ).project(camera);
-        if (_v.x < nMinX) nMinX = _v.x;
-        if (_v.x > nMaxX) nMaxX = _v.x;
-        if (_v.y < nMinY) nMinY = _v.y;
-        if (_v.y > nMaxY) nMaxY = _v.y;
-      }
+      if (!hasVerts) return;
 
-      // NDC z from box center → plane is placed at the content's average depth
-      _box.getCenter(_v).project(camera);
+      nMinX -= this.padding;
+      nMaxX += this.padding;
+      nMinY -= this.padding;
+      nMaxY += this.padding;
+
+      // NDC z from the world-space content center
+      _v.set(
+        (wMinX + wMaxX) * 0.5,
+        (wMinY + wMaxY) * 0.5,
+        (wMinZ + wMaxZ) * 0.5,
+      ).project(camera);
       const ndcZ = _v.z;
 
       // Unproject the 4 NDC bbox corners back to world space at that depth
