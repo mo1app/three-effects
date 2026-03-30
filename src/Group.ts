@@ -11,6 +11,7 @@ import {
   LinearFilter,
   Object3D,
   Camera,
+  Texture,
 } from "three/webgpu";
 import { texture as textureNode, uv, uniform } from "three/tsl";
 
@@ -67,6 +68,15 @@ export class Group extends ThreeGroup {
   // Bounds computed in preRenderEffects, consumed in onBeforeRender
   private _ndcBounds: NDCBounds | null = null;
 
+  // Single texture node: mutable .value + UV-remap baked in. Set once, reused forever.
+  private readonly _mapNode: ReturnType<typeof textureNode>;
+
+  // Extra nodes created via createOffsetSample(); kept in sync with _mapNode on resize.
+  private readonly _secondaryNodes: Array<ReturnType<typeof textureNode>> = [];
+
+  // Optional custom material; replaces _texMat when effectsEnabled
+  private _effectsMaterial: MeshBasicNodeMaterial | null = null;
+
   // Static registry of all effectsEnabled groups
   private static readonly _registry = new Set<Group>();
 
@@ -78,8 +88,46 @@ export class Group extends ThreeGroup {
   set effectsEnabled(v: boolean) {
     this._effectsEnabled = v;
     this._plane.visible = v;
-    if (v) Group._registry.add(this);
-    else Group._registry.delete(this);
+    if (v) {
+      Group._registry.add(this);
+      this._setContentLayer0(false); // hide from main camera; captured via _layer
+    } else {
+      Group._registry.delete(this);
+      this._setContentLayer0(true);  // restore normal visibility
+    }
+  }
+
+  /**
+   * Optional custom TSL material for the billboard.
+   * Use `this.mapNode` in its `colorNode` to sample the captured texture.
+   * Should have `transparent: true`, `depthWrite: true`, `side: 2`.
+   */
+  get effectsMaterial(): MeshBasicNodeMaterial | null {
+    return this._effectsMaterial;
+  }
+  set effectsMaterial(mat: MeshBasicNodeMaterial | null) {
+    this._effectsMaterial = mat;
+  }
+
+  /** Pre-cropped texture node — use this in a custom `effectsMaterial.colorNode`. */
+  get mapNode(): ReturnType<typeof textureNode> {
+    return this._mapNode;
+  }
+
+  /**
+   * Creates a second texture node that samples the render target at
+   * (remappedUV + uvOffsetNode), staying in sync with the primary `mapNode`.
+   * `uvOffsetNode` is in render-target UV space [0..1].
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  createOffsetSample(uvOffsetNode: any): ReturnType<typeof textureNode> {
+    const uvMapped = uv()
+      .mul(this._uvMax.sub(this._uvMin))
+      .add(this._uvMin)
+      .add(uvOffsetNode);
+    const node = textureNode(this._mapNode.value, uvMapped);
+    this._secondaryNodes.push(node);
+    return node;
   }
 
   // ── constructor ───────────────────────────────────────────────────────────
@@ -89,6 +137,12 @@ export class Group extends ThreeGroup {
 
     this._layer = _layerCounter++;
     if (_layerCounter > 31) _layerCounter = 1;
+
+    // Build mapNode once: placeholder texture + UV remap driven by uniforms.
+    // Only .value needs updating when the render target is resized.
+    const uvMapped = uv().mul(this._uvMax.sub(this._uvMin)).add(this._uvMin);
+    this._mapNode = textureNode(new Texture(), uvMapped);
+    this._texMat.colorNode = this._mapNode;
 
     this._plane = new Mesh(_geo, this._solidMat);
     this._plane.visible = false; // shown only when effectsEnabled = true
@@ -120,14 +174,9 @@ export class Group extends ThreeGroup {
       this.worldToLocal(_wTL);
       this._plane.scale.set(_wBL.distanceTo(_wBR), _wBL.distanceTo(_wTL), 1);
 
-      this._plane.material = this._effectsEnabled ? this._texMat : this._solidMat;
-
-      // Hide content so the quad is the sole representation in the main pass
-      if (this._effectsEnabled) this._setContentVisible(false);
-    };
-
-    this._plane.onAfterRender = () => {
-      if (this._effectsEnabled) this._setContentVisible(true);
+      this._plane.material = this._effectsEnabled
+        ? (this._effectsMaterial ?? this._texMat)
+        : this._solidMat;
     };
 
     this.add(this._plane);
@@ -213,10 +262,9 @@ export class Group extends ThreeGroup {
       this._targetW = w;
       this._targetH = h;
 
-      // Rebuild colour node with new texture (only on resize)
-      const uvMapped = uv().mul(this._uvMax.sub(this._uvMin)).add(this._uvMin);
-      this._texMat.colorNode = textureNode(this._target.texture, uvMapped);
-      this._texMat.needsUpdate = true;
+      // Update the texture reference in all nodes; UV remap uniforms handle the rest.
+      this._mapNode.value = this._target.texture;
+      for (const n of this._secondaryNodes) n.value = this._target.texture;
     }
 
     // Temporarily grant our layer to scene lights so they illuminate content
@@ -263,9 +311,14 @@ export class Group extends ThreeGroup {
 
   // ── overrides ─────────────────────────────────────────────────────────────
 
-  private _setContentVisible(visible: boolean): void {
+  /** Toggle layer 0 on all content children (not the plane). */
+  private _setContentLayer0(enabled: boolean): void {
     for (const child of this.children) {
-      if (child !== this._plane) child.visible = visible;
+      if (child === this._plane) continue;
+      child.traverse((node) => {
+        if (enabled) node.layers.enable(0);
+        else node.layers.disable(0);
+      });
     }
   }
 
@@ -274,7 +327,11 @@ export class Group extends ThreeGroup {
     super.add(...objects);
     for (const obj of objects) {
       if (obj === this._plane) continue;
-      obj.traverse((child) => child.layers.enable(this._layer));
+      obj.traverse((child) => {
+        child.layers.enable(this._layer);
+        // If effects are already active, keep content off layer 0.
+        if (this._effectsEnabled) child.layers.disable(0);
+      });
     }
     return this;
   }
