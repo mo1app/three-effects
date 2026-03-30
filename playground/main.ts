@@ -60,6 +60,5 @@ renderer.setAnimationLoop((time) => {
   cube.rotation.x = t * 0.45;
   cube.rotation.y = t * 0.65;
   controls.update();
-  group.updateCamera(camera);
   renderer.render(scene, camera);
 });

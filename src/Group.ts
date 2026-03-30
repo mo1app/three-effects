@@ -4,7 +4,6 @@ import {
   PlaneGeometry,
   MeshBasicNodeMaterial,
   Color,
-  Camera,
 } from "three/webgpu";
 
 const _planeGeometry = new PlaneGeometry(1.4, 1.4);
@@ -20,13 +19,10 @@ export class Group extends ThreeGroup {
       new MeshBasicNodeMaterial({ color: new Color(0xff2020), side: 2 }),
     );
 
-    this.add(this._plane);
-  }
+    this._plane.onBeforeRender = (_renderer, _scene, camera) => {
+      this._plane.quaternion.copy(camera.quaternion);
+    };
 
-  /**
-   * Call once per frame so the plane faces the camera.
-   */
-  updateCamera(camera: Camera): void {
-    this._plane.quaternion.copy(camera.quaternion);
+    this.add(this._plane);
   }
 }
