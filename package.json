@@ -1,0 +1,42 @@
+{
+  "name": "three-group-effects",
+  "version": "0.0.0",
+  "description": "",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "dev": "vite --config playground/vite.config.ts",
+    "dev:lib": "vite build --watch",
+    "build": "vite build && tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [],
+  "license": "MIT",
+  "peerDependencies": {
+    "three": ">=0.160.0 <0.200.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.172.0",
+    "three": "^0.172.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.2.0"
+  }
+}
