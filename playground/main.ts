@@ -1,5 +1,6 @@
 import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { Pane } from "tweakpane";
 import { Group } from "three-group-effects";
 
 const root = document.querySelector("#app")!;
@@ -42,6 +43,7 @@ const cube = new THREE.Mesh(
 );
 
 const group = new Group();
+group.effectsEnabled = true;
 group.position.y = 0.5;
 group.add(cube);
 scene.add(group);
@@ -57,10 +59,22 @@ const sphereA = new THREE.Mesh(sphereGeo, sphereMat);
 const sphereB = new THREE.Mesh(sphereGeo, sphereMat);
 
 const group2 = new Group();
+group2.effectsEnabled = true;
 group2.padding = 0.05;
 group2.position.set(2.4, 0.8, 0);
 group2.add(sphereA, sphereB);
 scene.add(group2);
+
+// ── Tweakpane ─────────────────────────────────────────────────────────────────
+const pane = new Pane({ title: "three-group-effects" });
+
+const f1 = pane.addFolder({ title: "group (cube)" });
+f1.addBinding(group, "effectsEnabled", { label: "effectsEnabled" });
+f1.addBinding(group, "padding", { label: "padding", min: 0, max: 0.3, step: 0.01 });
+
+const f2 = pane.addFolder({ title: "group2 (spheres)" });
+f2.addBinding(group2, "effectsEnabled", { label: "effectsEnabled" });
+f2.addBinding(group2, "padding", { label: "padding", min: 0, max: 0.3, step: 0.01 });
 
 function onResize() {
   const w = window.innerWidth;
@@ -82,5 +96,6 @@ renderer.setAnimationLoop((time) => {
   sphereB.position.set(Math.cos(t * 0.8 + Math.PI) * 0.7, Math.sin(t * 1.3 + 1) * 0.4, Math.sin(t * 0.8 + Math.PI) * 0.7);
 
   controls.update();
+  Group.preRenderEffects(renderer, scene, camera);
   renderer.render(scene, camera);
 });

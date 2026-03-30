@@ -36,6 +36,7 @@
   "devDependencies": {
     "@types/three": "^0.172.0",
     "three": "^0.172.0",
+    "tweakpane": "^4.0.5",
     "typescript": "^5.7.3",
     "vite": "^6.2.0"
   }
