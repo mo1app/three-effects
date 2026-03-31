@@ -4,6 +4,10 @@ Photoshop-style **layer effects** for [Three.js](https://threejs.org/) **WebGPU*
 
 ## Quick start (`Group`)
 
+1. User **`Group`** from **`three-effects`** as a **`THREE.Group`** replacement.
+2. Configure the **`group.effects`**: each effect block needs to be manually **`enabled`**, and exposes parameters to be adjusted (see all below).
+3. Call **`preRenderEffects(renderer, scene, camera)`** once **before** **`renderer.render(scene, camera)`**.
+
 ```ts
 import { Group, preRenderEffects } from "three-effects";
 // … WebGPURenderer, scene, camera …
@@ -54,6 +58,29 @@ If you need the material updated **before** the next **`preRenderEffects`** (e.g
 Effects are composited in a fixed order (similar to a layer stack): **drop shadow → outer glow → content and color/gradient overlays → inner shadow → inner glow → stroke → blur → layer opacity**.
 
 **Blur** (when enabled) runs a **second pass**: the full style stack (without blur and without layer opacity) is rendered into a temp target the same size as the crop, then **Gaussian blur** is applied to that texture; layer opacity multiplies the result. Use **`autoPadding`** (default) or **`paddingExtra`** so the crop has enough margin for the blur kernel.
+
+### Debug helpers
+
+Effects groups composite inside a **screen-space billboard** (the crop that wraps your children’s footprint). For layout and capture debugging, **`Group`** and **`GroupRaw`** expose optional on-screen helpers:
+
+| Property / field        | Type                      | Purpose                                                                                                                                                                                                                                                                                                                     |
+| ----------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`debug`**             | `boolean`                 | When **`true`**, shows a **screen-space border** around the billboard quad. Thickness is **`debugStrokePixels`** (default **4**) in **pixels**, independent of camera distance. Color follows **`debugColor`**. When **`false`**, the border and **`debugGroup`** are hidden.                                               |
+| **`debugColor`**        | `Color`                   | Border color; also a natural tint when you add your own labels under **`debugGroup`**.                                                                                                                                                                                                                                      |
+| **`debugStrokePixels`** | `number`                  | Border width in **screen pixels**.                                                                                                                                                                                                                                                                                          |
+| **`debugGroup`**        | `THREE.Group` (read-only) | Anchored at the **top-right** of the billboard in screen space. Each frame its scale is set so **one local unit ≈ one screen pixel**, so you can position child objects (e.g. **`Sprite`**, **`Mesh`** planes with canvas textures) with predictable pixel offsets. Add custom helpers here; visibility tracks **`debug`**. |
+
+Example:
+
+```ts
+const g = new Group();
+g.debug = true;
+g.debugColor.set(0xff6600);
+g.debugGroup.add(myLabelSprite);
+scene.add(g);
+```
+
+The **playground** (`npm run dev`) toggles **`debug`** for its demo groups from the Layers panel **Helpers** button; that preference is stored with the rest of the playground UI in **`localStorage`**.
 
 ## Layer effects
 
@@ -213,10 +240,10 @@ Access fields as **`g.effects.<name>.<field>`**. Every block has **`enabled`**. 
 
 `g.effects.blur`
 
-| Property  | Type      | Notes                                                                 |
-| --------- | --------- | --------------------------------------------------------------------- |
-| `enabled` | `boolean` |                                                                       |
-| `sizePx`  | `number`  | Blur radius in **screen pixels** (converted for TSL `gaussianBlur`).   |
+| Property  | Type      | Notes                                                                |
+| --------- | --------- | -------------------------------------------------------------------- |
+| `enabled` | `boolean` |                                                                      |
+| `sizePx`  | `number`  | Blur radius in **screen pixels** (converted for TSL `gaussianBlur`). |
 
 ### opacity
 
