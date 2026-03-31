@@ -1,9 +1,12 @@
 import * as THREE from "three/webgpu";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { texture as tslTexture, uniform } from "three/tsl";
+import { texture as tslTexture } from "three/tsl";
 import { createApp, watch } from "vue";
-import { colorStopsFromSerialized, createGradientTexture, layerStyles } from "three-group-effects";
-import { Group } from "../src/Group.js";
+import {
+  Group as EffectsGroup,
+  preRenderEffects,
+  type GroupEffects,
+} from "../src/index.js";
 import App from "./App.vue";
 import {
   editorModel,
@@ -16,27 +19,6 @@ import {
   type StrokeEffectState,
 } from "./layersModel";
 import "./shake.css";
-
-/** Stroke size uniforms keyed by layer ID — value is stroke radius in screen pixels. */
-const strokeSizeUniforms: Record<string, ReturnType<typeof uniform<number>>> = {};
-
-/** Rebuilt whenever gradient overlay stops change for that layer. */
-const gradientTextures: Record<string, THREE.DataTexture> = {};
-
-/**
- * Drop shadow blur sigma — keeps kernel quality consistent with the library default.
- * To convert a UI "Size" in screen pixels to the `blurRadius` that GaussianBlurNode
- * expects (pixel units), use: `sizePx / (2 + 2 * DS_SIGMA)`.
- *
- * `distance` (UV space) is derived from `distancePx / group.renderTargetWidth`;
- * when the RT has not been sized yet we fall back to a 200 px estimate.
- */
-const DS_SIGMA = 12;
-
-/** Inner shadow / inner glow / outer glow blur sigma (matches library defaults). */
-const IS_SIGMA = 8;
-const IG_SIGMA = 8;
-const OG_SIGMA = 8;
 
 const root = document.querySelector("#app")!;
 
@@ -77,13 +59,10 @@ const cube = new THREE.Mesh(
   }),
 );
 
-const cubeGroup = new Group();
-// Must stay true: RT capture + billboard + mapNode/layerStyles only run when effects are on.
-// We do not toggle this from the Layers UI — only `effectsMaterial` (passthrough vs stroke).
-cubeGroup.effectsEnabled = true;
+const cubeGroup = new EffectsGroup();
 cubeGroup.debug = true;
 cubeGroup.debugColor.set(0x00aa44);
-cubeGroup.padding = 0.1;
+cubeGroup.paddingExtra = 0;
 cubeGroup.position.y = 0.5;
 cubeGroup.add(cube);
 scene.add(cubeGroup);
@@ -97,19 +76,17 @@ const sphereGeo = new THREE.SphereGeometry(0.28, 32, 32);
 const sphereA = new THREE.Mesh(sphereGeo, sphereMat);
 const sphereB = new THREE.Mesh(sphereGeo, sphereMat);
 
-const groupA = new Group();
-groupA.effectsEnabled = true; // see cubeGroup comment
+const groupA = new EffectsGroup();
 groupA.debug = true;
 groupA.debugColor.set(0xff6600);
-groupA.padding = 0.05;
+groupA.paddingExtra = 0;
 groupA.add(sphereA);
 scene.add(groupA);
 
-const groupB = new Group();
-groupB.effectsEnabled = true; // see cubeGroup comment
+const groupB = new EffectsGroup();
 groupB.debug = true;
 groupB.debugColor.set(0xff0066);
-groupB.padding = 0.05;
+groupB.paddingExtra = 0;
 groupB.add(sphereB);
 scene.add(groupB);
 
@@ -130,10 +107,17 @@ function makeLabel(text: string, bgHex: number): THREE.Mesh {
   ctx.font = FONT;
   ctx.fillText(text, PAD, 54);
   const tex = new THREE.CanvasTexture(canvas);
-  const mat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthTest: false, side: 2 });
+  const mat = new THREE.MeshBasicNodeMaterial({
+    transparent: true,
+    depthTest: false,
+    side: 2,
+  });
   mat.colorNode = tslTexture(tex);
   const h = 50;
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(h * (W / labelH), h), mat);
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(h * (W / labelH), h),
+    mat,
+  );
   mesh.renderOrder = 1000;
   mesh.frustumCulled = false;
   const w = h * (W / labelH);
@@ -145,17 +129,18 @@ cubeGroup.debugGroup.add(makeLabel("cube", 0x00aa44));
 groupA.debugGroup.add(makeLabel("sphere A", 0xff6600));
 groupB.debugGroup.add(makeLabel("sphere B", 0xff0066));
 
-const layerObjects: Record<string, InstanceType<typeof Group>> = {
+const layerObjects: Record<string, EffectsGroup> = {
   group: cubeGroup,
   groupA,
   groupB,
 };
 
-function syncEffectsMaterials() {
+function syncEditorToGroupEffects() {
   for (const layerId of Object.keys(layerObjects)) {
     const g = layerObjects[layerId]!;
-    const prev = g.effectsMaterial;
-    const stroke = editorModel.effects[layerId]?.stroke as StrokeEffectState | undefined;
+    const stroke = editorModel.effects[layerId]?.stroke as
+      | StrokeEffectState
+      | undefined;
     const colorOverlay = editorModel.effects[layerId]?.colorOverlay as
       | ColorOverlayEffectState
       | undefined;
@@ -165,130 +150,88 @@ function syncEffectsMaterials() {
     const innerShadow = editorModel.effects[layerId]?.innerShadow as
       | InnerShadowEffectState
       | undefined;
-    const innerGlow = editorModel.effects[layerId]?.innerGlow as InnerGlowEffectState | undefined;
-    const outerGlow = editorModel.effects[layerId]?.outerGlow as OuterGlowEffectState | undefined;
+    const innerGlow = editorModel.effects[layerId]?.innerGlow as
+      | InnerGlowEffectState
+      | undefined;
+    const outerGlow = editorModel.effects[layerId]?.outerGlow as
+      | OuterGlowEffectState
+      | undefined;
     const gradientOverlay = editorModel.effects[layerId]?.gradientOverlay as
       | GradientOverlayEffectState
       | undefined;
 
-    const useStroke = stroke?.initialized && stroke.enabled;
-    const useColorOverlay = colorOverlay?.initialized && colorOverlay.enabled;
-    const useDropShadow = dropShadow?.initialized && dropShadow.enabled;
-    const useInnerShadow = innerShadow?.initialized && innerShadow.enabled;
-    const useInnerGlow = innerGlow?.initialized && innerGlow.enabled;
-    const useOuterGlow = outerGlow?.initialized && outerGlow.enabled;
-    const useGradientOverlay = gradientOverlay?.initialized && gradientOverlay.enabled;
+    g.applyEffects((e: GroupEffects) => {
+      const useStroke = stroke?.initialized && stroke.enabled;
+      e.stroke.enabled = !!useStroke;
+      if (stroke?.initialized) {
+        e.stroke.sizePx = stroke.sizePx;
+        e.stroke.position = stroke.position;
+        e.stroke.opacity = stroke.opacity;
+        e.stroke.color.set(stroke.color);
+      }
 
-    if (!useGradientOverlay) {
-      gradientTextures[layerId]?.dispose();
-      delete gradientTextures[layerId];
-    }
+      const useCo = colorOverlay?.initialized && colorOverlay.enabled;
+      e.colorOverlay.enabled = !!useCo;
+      if (colorOverlay?.initialized) {
+        e.colorOverlay.opacity = colorOverlay.opacity;
+        e.colorOverlay.color.set(colorOverlay.color);
+      }
 
-    if (
-      !useStroke &&
-      !useColorOverlay &&
-      !useDropShadow &&
-      !useInnerShadow &&
-      !useInnerGlow &&
-      !useOuterGlow &&
-      !useGradientOverlay
-    ) {
-      const mat = new THREE.MeshBasicNodeMaterial({
-        transparent: true,
-        depthWrite: true,
-        side: 2,
-      });
-      mat.colorNode = g.mapNode as THREE.MeshBasicNodeMaterial["colorNode"];
-      g.effectsMaterial = mat;
-      prev?.dispose();
-      continue;
-    }
+      const useDs = dropShadow?.initialized && dropShadow.enabled;
+      e.dropShadow.enabled = !!useDs;
+      if (dropShadow?.initialized) {
+        e.dropShadow.opacity = dropShadow.opacity;
+        e.dropShadow.angle = dropShadow.angle;
+        e.dropShadow.distancePx = dropShadow.distancePx;
+        e.dropShadow.spread = dropShadow.spread;
+        e.dropShadow.sizePx = dropShadow.sizePx;
+        e.dropShadow.color.set(dropShadow.color);
+      }
 
-    const mat = new THREE.MeshBasicNodeMaterial({
-      transparent: true,
-      depthWrite: true,
-      side: 2,
+      const useOg = outerGlow?.initialized && outerGlow.enabled;
+      e.outerGlow.enabled = !!useOg;
+      if (outerGlow?.initialized) {
+        e.outerGlow.opacity = outerGlow.opacity;
+        e.outerGlow.spread = outerGlow.spread;
+        e.outerGlow.sizePx = outerGlow.sizePx;
+        e.outerGlow.color.set(outerGlow.color);
+      }
+
+      const useGo = gradientOverlay?.initialized && gradientOverlay.enabled;
+      e.gradientOverlay.enabled = !!useGo;
+      if (gradientOverlay?.initialized) {
+        e.gradientOverlay.opacity = gradientOverlay.opacity;
+        e.gradientOverlay.style = gradientOverlay.style;
+        e.gradientOverlay.angle = gradientOverlay.angle;
+        e.gradientOverlay.scale = gradientOverlay.scale;
+        e.gradientOverlay.reverse = gradientOverlay.reverse;
+        e.gradientOverlay.stops = gradientOverlay.stops.map((s) => ({
+          color: s.color,
+          position: s.position,
+        }));
+      }
+
+      const useIs = innerShadow?.initialized && innerShadow.enabled;
+      e.innerShadow.enabled = !!useIs;
+      if (innerShadow?.initialized) {
+        e.innerShadow.opacity = innerShadow.opacity;
+        e.innerShadow.angle = innerShadow.angle;
+        e.innerShadow.distancePx = innerShadow.distancePx;
+        e.innerShadow.choke = innerShadow.choke;
+        e.innerShadow.sizePx = innerShadow.sizePx;
+        e.innerShadow.color.set(innerShadow.color);
+      }
+
+      const useIg = innerGlow?.initialized && innerGlow.enabled;
+      e.innerGlow.enabled = !!useIg;
+      if (innerGlow?.initialized) {
+        e.innerGlow.opacity = innerGlow.opacity;
+        e.innerGlow.source = innerGlow.source;
+        e.innerGlow.choke = innerGlow.choke;
+        e.innerGlow.sizePx = innerGlow.sizePx;
+        e.innerGlow.color.set(innerGlow.color);
+      }
     });
-    let builder = layerStyles(g);
-    const rtW = g.renderTargetWidth > 0 ? g.renderTargetWidth : 200;
-
-    if (useDropShadow) {
-      builder = builder.dropShadow({
-        color: new THREE.Color(dropShadow!.color),
-        opacity: dropShadow!.opacity,
-        angle: dropShadow!.angle,
-        distance: dropShadow!.distancePx / rtW,
-        spread: dropShadow!.spread,
-        blurRadius: dropShadow!.sizePx / (2 + 2 * DS_SIGMA),
-        sigma: DS_SIGMA,
-      });
-    }
-    if (useOuterGlow) {
-      builder = builder.outerGlow({
-        color: new THREE.Color(outerGlow!.color),
-        opacity: outerGlow!.opacity,
-        spread: outerGlow!.spread,
-        blurRadius: outerGlow!.sizePx / (2 + 2 * OG_SIGMA),
-        sigma: OG_SIGMA,
-      });
-    }
-    if (useColorOverlay) {
-      builder = builder.colorOverlay({
-        color: new THREE.Color(colorOverlay!.color),
-        opacity: colorOverlay!.opacity,
-      });
-    }
-    if (useGradientOverlay) {
-      gradientTextures[layerId]?.dispose();
-      gradientTextures[layerId] = createGradientTexture(
-        colorStopsFromSerialized(gradientOverlay!.stops),
-      );
-      builder = builder.gradientOverlay({
-        texture: gradientTextures[layerId],
-        opacity: gradientOverlay!.opacity,
-        style: gradientOverlay!.style,
-        angle: gradientOverlay!.angle,
-        scale: gradientOverlay!.scale,
-        reverse: gradientOverlay!.reverse,
-      });
-    }
-    if (useInnerShadow) {
-      builder = builder.innerShadow({
-        color: new THREE.Color(innerShadow!.color),
-        opacity: innerShadow!.opacity,
-        angle: innerShadow!.angle,
-        distance: innerShadow!.distancePx / rtW,
-        choke: innerShadow!.choke,
-        blurRadius: innerShadow!.sizePx / (2 + 2 * IS_SIGMA),
-        sigma: IS_SIGMA,
-      });
-    }
-    if (useInnerGlow) {
-      builder = builder.innerGlow({
-        color: new THREE.Color(innerGlow!.color),
-        opacity: innerGlow!.opacity,
-        source: innerGlow!.source,
-        choke: innerGlow!.choke,
-        blurRadius: innerGlow!.sizePx / (2 + 2 * IG_SIGMA),
-        sigma: IG_SIGMA,
-      });
-    }
-    if (useStroke) {
-      // Reuse the per-layer uniform so the material graph is built once and
-      // the value is updated cheaply whenever sizePx changes.
-      if (!strokeSizeUniforms[layerId]) strokeSizeUniforms[layerId] = uniform(0);
-      // JFA takes the stroke radius directly in screen pixels.
-      strokeSizeUniforms[layerId].value = stroke!.sizePx;
-      builder = builder.stroke({
-        color: new THREE.Color(stroke!.color),
-        opacity: stroke!.opacity,
-        position: stroke!.position,
-        size: strokeSizeUniforms[layerId],
-      });
-    }
-    mat.colorNode = builder.node as THREE.MeshBasicNodeMaterial["colorNode"];
-    g.effectsMaterial = mat;
-    prev?.dispose();
   }
 }
 
@@ -305,9 +248,8 @@ if (uiRoot) {
   createApp(App, { toggleLayerVisibility }).mount(uiRoot);
 }
 
-// Deep-watch the whole model so nested edits (e.g. stroke sizePx) always resync materials.
-watch(editorModel, syncEffectsMaterials, { deep: true });
-syncEffectsMaterials();
+watch(editorModel, syncEditorToGroupEffects, { deep: true });
+syncEditorToGroupEffects();
 
 function onResize() {
   const w = window.innerWidth;
@@ -338,6 +280,6 @@ renderer.setAnimationLoop((time) => {
   );
 
   controls.update();
-  Group.preRenderEffects(renderer, scene, camera);
+  preRenderEffects(renderer, scene, camera);
   renderer.render(scene, camera);
 });

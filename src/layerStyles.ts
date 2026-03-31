@@ -20,7 +20,7 @@ import {
 } from "three/tsl";
 import { gaussianBlur } from "three/addons/tsl/display/GaussianBlurNode.js";
 import { jfaOutsideStroke, jfaInsideStroke } from "./jfaStroke.js";
-import { Group } from "./Group.js";
+import { GroupRaw } from "./GroupRaw.js";
 
 /**
  * Applies separable Gaussian blur with premultiplied alpha so RGB does not bleed
@@ -219,7 +219,7 @@ export interface StrokeOptions {
  * ```
  */
 export class LayerStylesBuilder {
-  private readonly _group: Group;
+  private readonly _group: GroupRaw;
 
   private _dropShadow?: DropShadowOptions;
   private _outerGlow?: OuterGlowOptions;
@@ -231,7 +231,7 @@ export class LayerStylesBuilder {
 
   private _cachedNode: ReturnType<typeof vec4> | null = null;
 
-  constructor(group: Group) {
+  constructor(group: GroupRaw) {
     this._group = group;
   }
 
@@ -500,8 +500,8 @@ export class LayerStylesBuilder {
 }
 
 /**
- * Entry point: returns a {@link LayerStylesBuilder} bound to the given effects `Group`.
+ * Entry point: returns a {@link LayerStylesBuilder} bound to the given effects `GroupRaw`.
  */
-export function layerStyles(group: Group): LayerStylesBuilder {
+export function layerStyles(group: GroupRaw): LayerStylesBuilder {
   return new LayerStylesBuilder(group);
 }
