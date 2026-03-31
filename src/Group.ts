@@ -324,6 +324,13 @@ export class Group extends GroupRaw {
   /** Set when `effects` change in a way that requires rebuilding `effectsMaterial`. Cleared when `GroupRaw.preRenderEffects` runs or when {@link commitEffects} is called. */
   private _effectsDirty = false;
 
+  /**
+   * Last `renderTargetWidth` (or {@link RT_FALLBACK}) used to bake drop/inner shadow UV distance.
+   * When the real crop width diverges (e.g. first build used fallback before any offscreen pass),
+   * we force a rebuild so `distancePx / rtW` matches the texture.
+   */
+  private _effectsDistanceRtWCommitted = 0;
+
   constructor() {
     super();
     // Match WebGPU RT orientation: same Y-flip as {@link GroupRaw.mapNode} (V=0 at texture top).
@@ -372,9 +379,27 @@ export class Group extends GroupRaw {
   }
 
   protected override _flushDeferredEffectsSync(): void {
+    const e = this._effectsTarget;
+    const rw = this.renderTargetWidth;
+    if (
+      (e.dropShadow.enabled || e.innerShadow.enabled) &&
+      rw > 0 &&
+      this._effectsDistanceRtWCommitted !== rw
+    ) {
+      this._effectsDirty = true;
+    }
     if (!this._effectsDirty) return;
     this._effectsDirty = false;
     this._syncEffectsMaterial();
+  }
+
+  private _touchEffectsDistanceRtWCommit(e: GroupEffects, rtW: number): void {
+    if (e.dropShadow.enabled || e.innerShadow.enabled) {
+      const rw = this.renderTargetWidth;
+      this._effectsDistanceRtWCommitted = rw > 0 ? rw : rtW;
+    } else {
+      this._effectsDistanceRtWCommitted = 0;
+    }
   }
 
   private _onEffectsPath(path: string[]): void {
@@ -561,6 +586,7 @@ export class Group extends GroupRaw {
 
     const rtW = this.renderTargetWidth > 0 ? this.renderTargetWidth : RT_FALLBACK;
 
+    try {
     if (blurOn) {
       if (e.gradientOverlay.enabled && e.gradientOverlay.stops.length > 0) {
         const prevTex = this._gradientTexture;
@@ -711,6 +737,9 @@ export class Group extends GroupRaw {
     this.effectsMaterial = mat;
     if (prev && prev !== mat) {
       this._releaseMaterialIfStale(prev);
+    }
+    } finally {
+      this._touchEffectsDistanceRtWCommit(e, rtW);
     }
   }
 
