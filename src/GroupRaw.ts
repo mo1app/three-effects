@@ -145,8 +145,11 @@ export class GroupRaw extends ThreeGroup {
   private _effectsEnabled = false;
   private readonly _plane: Mesh;
 
+  /** Fallback when `effectsEnabled` is false; kept invisible so init never flashes red. */
   private readonly _solidMat = new MeshBasicNodeMaterial({
-    color: new Color(0xff2020),
+    color: new Color(0xffffff),
+    transparent: true,
+    opacity: 0,
     side: 2,
     depthWrite: false,
   });
@@ -386,7 +389,7 @@ export class GroupRaw extends ThreeGroup {
     this._mapNode = textureNode(this._placeholderTex, uvRemapped);
     this._texMat.colorNode = this._mapNode;
 
-    this._plane = new Mesh(_geo, this._solidMat);
+    this._plane = new Mesh(_geo, this._texMat);
     this._plane.visible = false; // shown only when effectsEnabled = true
 
     // 4 thin quads forming a border frame — thickness driven per-frame in onBeforeRender.

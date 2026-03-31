@@ -16,6 +16,11 @@
         height: 100%;
         overflow: hidden;
       }
+      /* First paint only; main.ts sets the same from PLAYGROUND_SCENE_BACKGROUND */
+      html,
+      body {
+        background: #cccccc;
+      }
       body {
         font-family:
           system-ui,
@@ -23,7 +28,6 @@
           Segoe UI,
           Roboto,
           sans-serif;
-        background: #0f1115;
       }
       #app canvas {
         display: block;

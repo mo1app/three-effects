@@ -29,7 +29,12 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 root.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xffffff);
+/** Keep in sync with `body` / `html` background in `index.html` (first paint). */
+const PLAYGROUND_SCENE_BACKGROUND = 0xcccccc;
+scene.background = new THREE.Color(PLAYGROUND_SCENE_BACKGROUND);
+const playgroundBgCss = `#${PLAYGROUND_SCENE_BACKGROUND.toString(16).padStart(6, "0")}`;
+document.documentElement.style.backgroundColor = playgroundBgCss;
+document.body.style.backgroundColor = playgroundBgCss;
 
 const camera = new THREE.PerspectiveCamera(
   50,
@@ -37,26 +42,27 @@ const camera = new THREE.PerspectiveCamera(
   0.1,
   100,
 );
-camera.position.set(0, 0.6, 8.0);
+camera.position.set(0.6, 0.6, 8.0);
 
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
+controls.enableDamping = false;
 controls.target.set(0, 0.5, 0);
+controls.update();
 
-const key = new THREE.DirectionalLight(0xffffff, 1.15);
+const key = new THREE.DirectionalLight(0xffffff, 2);
 key.position.set(2.5, 4, 3);
 scene.add(key);
 scene.add(new THREE.AmbientLight(0xffffff, 0.28));
 
-const grid = new THREE.GridHelper(10, 20, 0x334155, 0x1e293b);
+const grid = new THREE.GridHelper(10, 20, 0x999999, 0x999999);
 scene.add(grid);
 
 const cube = new THREE.Mesh(
   new THREE.BoxGeometry(1, 1, 1),
   new THREE.MeshStandardNodeMaterial({
-    color: new THREE.Color(0x6ae3ff),
-    metalness: 0.25,
-    roughness: 0.42,
+    color: new THREE.Color(0xffffff),
+    metalness: 0,
+    roughness: 0.6,
   }),
 );
 
@@ -69,7 +75,7 @@ cubeGroup.add(cube);
 scene.add(cubeGroup);
 
 const sphereMat = new THREE.MeshStandardNodeMaterial({
-  color: new THREE.Color(0xffaa33),
+  color: new THREE.Color(0xffffff),
   metalness: 0.1,
   roughness: 0.55,
 });
@@ -122,7 +128,8 @@ function makeLabel(text: string, bgHex: number): THREE.Mesh {
   mesh.renderOrder = 1000;
   mesh.frustumCulled = false;
   const w = h * (W / labelH);
-  mesh.position.set(-w / 2, -h / 2, 0);
+  /** Outside the debug rect at top-right (x as before); y so label bottom meets the quad corner. */
+  mesh.position.set(-w / 2, h / 2, 0);
   return mesh;
 }
 
@@ -157,10 +164,11 @@ function syncEditorToGroupEffects() {
     const outerGlow = editorModel.value.effects[layerId]?.outerGlow as
       | OuterGlowEffectState
       | undefined;
-    const gradientOverlay = editorModel.value.effects[layerId]?.gradientOverlay as
-      | GradientOverlayEffectState
+    const gradientOverlay = editorModel.value.effects[layerId]
+      ?.gradientOverlay as GradientOverlayEffectState | undefined;
+    const blur = editorModel.value.effects[layerId]?.blur as
+      | BlurEffectState
       | undefined;
-    const blur = editorModel.value.effects[layerId]?.blur as BlurEffectState | undefined;
 
     const layerRow = editorModel.value.layers.find((l) => l.id === layerId);
 
