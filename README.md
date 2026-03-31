@@ -5,7 +5,7 @@ Photoshop-style **layer effects** for [Three.js](https://threejs.org/) **WebGPU*
 ## Quick start (`Group`)
 
 ```ts
-import { Group, preRenderEffects } from "three-effects";/
+import { Group, preRenderEffects } from "three-effects";
 // … WebGPURenderer, scene, camera …
 
 const g = new Group();
