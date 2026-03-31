@@ -10,6 +10,7 @@ import {
 import App from "./App.vue";
 import {
   editorModel,
+  type BlurEffectState,
   type ColorOverlayEffectState,
   type DropShadowEffectState,
   type GradientOverlayEffectState,
@@ -159,6 +160,7 @@ function syncEditorToGroupEffects() {
     const gradientOverlay = editorModel.effects[layerId]?.gradientOverlay as
       | GradientOverlayEffectState
       | undefined;
+    const blur = editorModel.effects[layerId]?.blur as BlurEffectState | undefined;
 
     const layerRow = editorModel.layers.find((l) => l.id === layerId);
 
@@ -237,6 +239,12 @@ function syncEditorToGroupEffects() {
         e.innerGlow.choke = innerGlow.choke;
         e.innerGlow.sizePx = innerGlow.sizePx;
         e.innerGlow.color.set(innerGlow.color);
+      }
+
+      const useBlur = blur?.initialized && blur.enabled;
+      e.blur.enabled = !!useBlur;
+      if (blur?.initialized) {
+        e.blur.sizePx = blur.sizePx;
       }
     });
   }

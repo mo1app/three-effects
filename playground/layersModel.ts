@@ -22,7 +22,8 @@ export type EffectId =
   | "colorOverlay"
   | "gradientOverlay"
   | "outerGlow"
-  | "dropShadow";
+  | "dropShadow"
+  | "blur";
 
 /** Base checkbox + visibility for non-parameterized effects. */
 export type LayerEffectState = {
@@ -107,6 +108,12 @@ export type OuterGlowEffectState = LayerEffectState & {
   sizePx: number;
 };
 
+/** Blur row: drives {@link GroupEffects.blur} (two-pass full-stack blur). */
+export type BlurEffectState = LayerEffectState & {
+  /** Blur radius in screen pixels. */
+  sizePx: number;
+};
+
 /** One color stop in the gradient ramp (`#rrggbb` + 0…1 position). */
 export type GradientOverlayStop = {
   color: string;
@@ -147,6 +154,7 @@ export const LAYER_EFFECTS_META: { id: EffectId; label: string; plus?: boolean }
   { id: "gradientOverlay", label: "Gradient Overlay" },
   { id: "outerGlow", label: "Outer Glow" },
   { id: "dropShadow", label: "Drop Shadow" },
+  { id: "blur", label: "Blur" },
 ];
 
 /** Per-effect state; parameterized effects use dedicated types. */
@@ -165,6 +173,7 @@ export type EditorModel = {
         | InnerGlowEffectState
         | OuterGlowEffectState
         | GradientOverlayEffectState
+        | BlurEffectState
       >
     >
   >;
@@ -214,6 +223,7 @@ export function getLayerEffectState(
   | InnerGlowEffectState
   | OuterGlowEffectState
   | GradientOverlayEffectState
+  | BlurEffectState
   | undefined {
   return editorModel.effects[layerId]?.[effectId];
 }
@@ -319,6 +329,13 @@ export function setLayerEffectFromDialog(
       scale: prev?.scale ?? 1,
       reverse: prev?.reverse ?? false,
       stops: prev?.stops ? prev.stops.map((s) => ({ ...s })) : defaultStops.map((s) => ({ ...s })),
+    };
+  } else if (effectId === "blur") {
+    const prev = editorModel.effects[layerId].blur as BlurEffectState | undefined;
+    editorModel.effects[layerId].blur = {
+      initialized: true,
+      enabled,
+      sizePx: prev?.sizePx ?? 10,
     };
   } else {
     editorModel.effects[layerId][effectId] = { initialized: true, enabled };

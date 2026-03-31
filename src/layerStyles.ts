@@ -182,6 +182,23 @@ export interface OpacityOptions {
   value: number | ReturnType<typeof uniform<number>>;
 }
 
+/**
+ * Layer-wide Gaussian blur on the captured layer texture (premultiplied).
+ * Direction scale matches {@link gaussianBlur} / other layer blurs: `sizePx / (2 + 2 * sigma)`.
+ *
+ * **Standalone `layerStyles`:** blurs the source before other effects are composited.
+ * **`Group` with blur enabled:** uses a two-pass path; do not chain `.blur()` on the builder.
+ */
+export interface BlurOptions {
+  /**
+   * Blur direction scale (same units as `blurRadius` on drop shadow / outer glow), or a
+   * pre-made `uniform(…)` for live updates without graph rebuild.
+   */
+  radius: number | ReturnType<typeof uniform<number>>;
+  /** Gaussian sigma (kernel quality). @default `8` */
+  sigma?: number;
+}
+
 export interface StrokeOptions {
   /** Stroke color. @default `#000000` */
   color?: Color;
@@ -221,7 +238,7 @@ export interface StrokeOptions {
 /**
  * Fluent builder for Photoshop-inspired layer styles as a single TSL `vec4` color node.
  * Effects are composited in **fixed** order (Photoshop stack): drop shadow → outer glow
- * → content + overlays → inner shadow → inner glow → stroke → optional layer opacity.
+ * → content + overlays → inner shadow → inner glow → stroke → optional blur → optional layer opacity.
  * Omitted methods stay off.
  *
  * @example
@@ -241,6 +258,7 @@ export class LayerStylesBuilder {
   private _innerShadow?: InnerShadowOptions;
   private _innerGlow?: InnerGlowOptions;
   private _stroke?: StrokeOptions;
+  private _blur?: BlurOptions;
   private _opacity?: OpacityOptions;
 
   private _cachedNode: ReturnType<typeof vec4> | null = null;
@@ -298,6 +316,16 @@ export class LayerStylesBuilder {
     return this;
   }
 
+  /**
+   * Blur the layer source texture (standalone). For full-stack blur after stroke, use
+   * {@link Group} `effects.blur` (two-pass).
+   */
+  blur(opts: BlurOptions): this {
+    this._blur = opts;
+    this._cachedNode = null;
+    return this;
+  }
+
   /** Multiply final RGB and alpha by a single factor (layer opacity). */
   opacity(opts: OpacityOptions): this {
     this._opacity = opts;
@@ -319,8 +347,22 @@ export class LayerStylesBuilder {
   private _build(): ReturnType<typeof vec4> {
     const src = this._group.mapNode;
     const srcTex = src as ReturnType<typeof texture>;
-    const srcRgb = vec3(src.r, src.g, src.b);
-    const srcA = src.a;
+
+    const bl = this._blur;
+    let srcRgb: ReturnType<typeof vec3>;
+    let srcA: ReturnType<typeof float>;
+    if (bl) {
+      const sigma = bl.sigma ?? 8;
+      const r = bl.radius;
+      const blurR: ReturnType<typeof uniform<number>> =
+        typeof r === "number" ? uniform(r) : r;
+      const blurred = blurPremult(srcTex, blurR, sigma);
+      srcRgb = vec3(blurred.r, blurred.g, blurred.b);
+      srcA = blurred.a;
+    } else {
+      srcRgb = vec3(src.r, src.g, src.b);
+      srcA = src.a;
+    }
 
     const ds = this._dropShadow;
     const og = this._outerGlow;

@@ -63,6 +63,10 @@ function baseEffects(): GroupEffects {
       sizePx: 8,
       color: new Color(0xffffff),
     },
+    blur: {
+      enabled: false,
+      sizePx: 10,
+    },
     opacity: {
       enabled: true,
       value: 1,
@@ -131,5 +135,22 @@ describe("effectsMaterialCacheKey", () => {
     const k0 = effectsMaterialCacheKey(e, 0);
     const kFallback = effectsMaterialCacheKey(e, RT_FALLBACK);
     expect(k0).toBe(kFallback);
+  });
+
+  it("does not include blur sizePx (live uniform)", () => {
+    const a = baseEffects();
+    a.blur.enabled = true;
+    a.blur.sizePx = 4;
+    const b = baseEffects();
+    b.blur.enabled = true;
+    b.blur.sizePx = 40;
+    expect(effectsMaterialCacheKey(a, 400)).toBe(effectsMaterialCacheKey(b, 400));
+  });
+
+  it("changes key when blur is toggled on", () => {
+    const off = baseEffects();
+    const on = baseEffects();
+    on.blur.enabled = true;
+    expect(effectsMaterialCacheKey(off, 400)).not.toBe(effectsMaterialCacheKey(on, 400));
   });
 });

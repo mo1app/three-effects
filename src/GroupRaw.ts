@@ -321,6 +321,11 @@ export class GroupRaw extends ThreeGroup {
    */
   protected _flushDeferredEffectsSync(): void {}
 
+  /** Whether the effects billboard is visible this frame (false when content is off-screen). */
+  protected _isEffectsBillboardVisible(): boolean {
+    return this._plane.visible;
+  }
+
   /**
    * Distance from the camera to the world-space center of the content meshes’
    * axis-aligned bounds (same center used for {@link _computeNDCBounds} `ndcZ`).
@@ -564,7 +569,7 @@ export class GroupRaw extends ThreeGroup {
     return { nMinX, nMaxX, nMinY, nMaxY, nMinZ, nMaxZ, ndcZ: _v.z };
   }
 
-  private _renderToTarget(
+  protected _renderToTarget(
     renderer: RendererLike,
     scene: Scene,
     camera: PerspectiveCamera,

@@ -4,6 +4,7 @@ import {
   editorModel,
   LAYER_EFFECTS_META,
   setLayerEffectFromDialog,
+  type BlurEffectState,
   type DropShadowEffectState,
   type EffectId,
   type InnerGlowEffectState,
@@ -311,6 +312,16 @@ const gradientEditorOpen = ref(false);
 
 function onGradientEditorApply(stops: GradientOverlayStop[]) {
   patchGradientOverlay({ stops: stops.map((x) => ({ ...x })) });
+}
+
+const blurState = computed(
+  () => editorModel.effects[props.layer.id]?.blur as BlurEffectState | undefined,
+);
+
+function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
+  const s = editorModel.effects[props.layer.id]?.blur as BlurEffectState | undefined;
+  if (!s?.initialized) return;
+  Object.assign(s, partial);
 }
 </script>
 
@@ -983,6 +994,38 @@ function onGradientEditorApply(stops: GradientOverlayStop[]) {
                 step="1"
                 :value="dropShadowState.sizePx"
                 @input="patchDropShadow({ sizePx: +($event.target as HTMLInputElement).value })"
+              />
+              <span class="unit">px</span>
+            </div>
+          </template>
+        </section>
+
+        <!-- Blur -->
+        <section v-show="selectedEffect === 'blur'" class="effect-panel">
+          <h2 class="panel-heading">Blur</h2>
+          <p v-if="!blurState?.initialized" class="effect-hint">
+            Check "Blur" in the list to enable these options.
+          </p>
+          <template v-else>
+            <div class="field-row">
+              <span class="field-label">Size:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="50"
+                step="1"
+                :value="blurState.sizePx"
+                @input="patchBlur({ sizePx: +($event.target as HTMLInputElement).value })"
+              />
+              <input
+                class="field-num"
+                type="number"
+                min="0"
+                max="256"
+                step="1"
+                :value="blurState.sizePx"
+                @input="patchBlur({ sizePx: +($event.target as HTMLInputElement).value })"
               />
               <span class="unit">px</span>
             </div>

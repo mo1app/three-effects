@@ -8,7 +8,7 @@ function round4(n: number): number {
 
 /**
  * Stable JSON signature for {@link Group} `effectsMaterial` LRU cache.
- * Excludes live uniforms: `stroke.sizePx`, `effects.opacity.value`.
+ * Excludes live uniforms: `stroke.sizePx`, `effects.opacity.value`, `effects.blur.sizePx`.
  */
 export function effectsMaterialCacheKey(e: GroupEffects, rtW: number): string {
   const w = rtW > 0 ? rtW : RT_FALLBACK;
@@ -23,11 +23,12 @@ export function effectsMaterialCacheKey(e: GroupEffects, rtW: number): string {
     e.innerShadow.enabled ||
     e.innerGlow.enabled;
   const layerOpacityOn = e.opacity.enabled;
+  const blurOn = e.blur.enabled;
 
-  if (!hasStyleEffects && !layerOpacityOn) {
+  if (!hasStyleEffects && !layerOpacityOn && !blurOn) {
     return JSON.stringify({ p: 1 });
   }
-  if (!hasStyleEffects && layerOpacityOn) {
+  if (!hasStyleEffects && layerOpacityOn && !blurOn) {
     return JSON.stringify({ lo: 1 });
   }
 
@@ -97,6 +98,9 @@ export function effectsMaterialCacheKey(e: GroupEffects, rtW: number): string {
   }
   if (layerOpacityOn) {
     o.lo = 1;
+  }
+  if (blurOn) {
+    o.blur = 1;
   }
   return JSON.stringify(o);
 }

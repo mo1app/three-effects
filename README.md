@@ -1,6 +1,6 @@
 # three-effects
 
-Photoshop-style **layer effects** for [Three.js](https://threejs.org/) **WebGPU**: drop shadow, outer glow, strokes, inner shadow / glow, overlays, and layer opacity—implemented with **TSL** (Three Shading Language) and a **Jump Flooding Algorithm (JFA)** for crisp, screen-space strokes.
+Photoshop-style **layer effects** for [Three.js](https://threejs.org/) **WebGPU**: drop shadow, outer glow, strokes, inner shadow / glow, overlays, a **layer blur** (full composite, before opacity), and layer opacity—implemented with **TSL** (Three Shading Language) and a **Jump Flooding Algorithm (JFA)** for crisp, screen-space strokes.
 
 ## Quick start (`Group`)
 
@@ -18,6 +18,9 @@ g.effects.dropShadow.sizePx = 20;
 g.effects.stroke.enabled = true;
 g.effects.stroke.sizePx = 4;
 g.effects.stroke.color.set(0xffffff);
+
+g.effects.blur.enabled = true;
+g.effects.blur.sizePx = 8;
 
 scene.add(g);
 
@@ -48,7 +51,9 @@ Changes that require a **new shader graph** are **deferred**: assigning to **`g.
 
 If you need the material updated **before** the next **`preRenderEffects`** (e.g. a test or a screenshot), call **`g.commitEffects()`**.
 
-Effects are composited in a fixed order (similar to a layer stack): **drop shadow → outer glow → content and color/gradient overlays → inner shadow → inner glow → stroke → layer opacity**.
+Effects are composited in a fixed order (similar to a layer stack): **drop shadow → outer glow → content and color/gradient overlays → inner shadow → inner glow → stroke → blur → layer opacity**.
+
+**Blur** (when enabled) runs a **second pass**: the full style stack (without blur and without layer opacity) is rendered into a temp target the same size as the crop, then **Gaussian blur** is applied to that texture; layer opacity multiplies the result. Use **`autoPadding`** (default) or **`paddingExtra`** so the crop has enough margin for the blur kernel.
 
 ## Layer effects
 
@@ -61,6 +66,7 @@ Each effect is a property on **`g.effects`**. Set **`enabled: true`** to turn it
 - **[gradientOverlay](#gradientoverlay)** — linear or radial gradient over the layer; uses **`stops`** (`#rrggbb` + position); see also **[Gradients](#gradients)**.
 - **[innerShadow](#innershadow)** — recessed shadow along the inside edge.
 - **[innerGlow](#innerglow)** — glow from the inner edge or from the center.
+- **[blur](#blur)** — blurs the **fully composited** result (after stroke); **before** layer opacity. Radius in screen pixels.
 - **[opacity](#opacity)** — multiplies final RGBA after the other styles.
 
 ## Gradients
@@ -73,17 +79,19 @@ Build 1×N gradient **`DataTexture`** ramps for overlays:
 ## Advanced
 
 - **`jfaOutsideStroke`** / **`jfaInsideStroke`** — JFA distance-field stroke nodes (used by the layer-style stroke; exposed for custom graphs).
-- **`effectsMaterialCacheKey(effects, rtWidth)`** and **`RT_FALLBACK`** — stable cache keys for `Group`’s internal material LRU (rarely needed outside the library).
+- **`effectsMaterialCacheKey(effects, rtWidth)`** and **`RT_FALLBACK`** — stable cache keys for `Group`’s internal material LRU (rarely needed outside the library). Blur `sizePx` is driven by a uniform and is **not** part of the key.
 
 ## TypeScript
 
-Types are published under **`dist`**. Import from **`three-effects`**; types for effect blocks live under names like **`GroupEffects`**, **`DropShadowOptions`**, etc.
+Types are published under **`dist`**. Import from **`three-effects`**; types for effect blocks live under names like **`GroupEffects`**, **`GroupEffectsBlur`**, **`DropShadowOptions`**, **`BlurOptions`**, etc.
 
 ## Low-level API: `GroupRaw` and `layerStyles`
 
 For full control, use **`GroupRaw`**: same billboard and render-target capture as **`Group`**, but you supply **`effectsMaterial`** yourself and read the captured texture from **`mapNode`** (and **`createOffsetSample`** for offsets). You still call **`preRenderEffects`** before the main render.
 
 **`layerStyles(group)`** returns a fluent **`LayerStylesBuilder`**: chain **`.dropShadow()`**, **`.outerGlow()`**, **`.stroke()`**, … and use **`.node`** as the **`vec4`** color node on **`MeshBasicNodeMaterial`**. **`Group`** uses this internally; with **`GroupRaw`** you compose your own stack. Omitted methods stay off. Effect order matches the high-level pipeline above.
+
+**`.blur({ radius, sigma? })`** — blurs the **captured** layer texture **before** the rest of the stack (standalone use). **`Group`** does **not** chain **`.blur()`** on the builder: it uses **`g.effects.blur`** instead, which blurs the **full composite** after stroke via the extra pass described above.
 
 ```ts
 import { GroupRaw, layerStyles, preRenderEffects } from "three-effects";
@@ -200,6 +208,15 @@ Access fields as **`g.effects.<name>.<field>`**. Every block has **`enabled`**. 
 | `choke`   | `number`  | `0…1`.                  |
 | `sizePx`  | `number`  | Blur size in pixels.    |
 | `color`   | `Color`   |                         |
+
+### blur
+
+`g.effects.blur`
+
+| Property  | Type      | Notes                                                                 |
+| --------- | --------- | --------------------------------------------------------------------- |
+| `enabled` | `boolean` |                                                                       |
+| `sizePx`  | `number`  | Blur radius in **screen pixels** (converted for TSL `gaussianBlur`).   |
 
 ### opacity
 
