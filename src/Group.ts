@@ -236,6 +236,38 @@ export class Group extends ThreeGroup {
   }
 
   /**
+   * Physical pixel width of the current render target (updated each frame by
+   * {@link preRenderEffects}). Returns `0` before the first frame renders.
+   *
+   * The RT is sized to exactly cover the group's screen footprint at
+   * 1 RT-pixel-per-screen-pixel fidelity, so this value tells you how many
+   * screen pixels wide the group currently is. Useful for diagnostics or for
+   * effects that need to know the current on-screen pixel budget.
+   *
+   * **Note for `layerStyles` blur-based effects** — `GaussianBlurNode` takes
+   * its `directionNode` in **texel (pixel) units** and divides by texture size
+   * internally. The correct conversion from a desired pixel width to the
+   * direction value is:
+   *
+   * ```ts
+   * directionNode = desiredPixels / (2 + 2 * sigma)
+   * ```
+   *
+   * This depends only on the kernel sigma, not on `renderTargetWidth`.
+   */
+  get renderTargetWidth(): number {
+    return this._targetW;
+  }
+
+  /**
+   * Physical pixel height of the current render target.
+   * See {@link renderTargetWidth} for coordinate-system notes.
+   */
+  get renderTargetHeight(): number {
+    return this._targetH;
+  }
+
+  /**
    * A pre-built TSL texture node that samples the group's private render
    * target with Y-axis corrected UVs. Use this as (part of) the `colorNode`
    * of your `effectsMaterial`.
@@ -261,6 +293,10 @@ export class Group extends ThreeGroup {
   createOffsetSample(uvOffsetNode: Node): ReturnType<typeof textureNode> {
     const uvRemapped = uv().mul(this._uvScale).add(this._uvOffset);
     const node = textureNode(this._placeholderTex, uvRemapped.add(uvOffsetNode));
+    // If a render target is already allocated (effects were previously active),
+    // seed the node with the real texture immediately so GaussianBlurNode can
+    // read its dimensions on the very first frame — not just on resize.
+    if (this._target) node.value = this._target.texture;
     this._secondaryNodes.push(node);
     return node;
   }
