@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 import {
   editorModel,
   LAYER_EFFECTS_META,
@@ -32,16 +32,20 @@ const emit = defineEmits<{
   close: [];
 }>();
 
-const selectedEffect = ref<EffectId>("stroke");
+const selectedEffect = computed({
+  get: () => editorModel.value.ui.layerStyleSelectedEffect,
+  set: (v: EffectId) => {
+    editorModel.value.ui.layerStyleSelectedEffect = v;
+  },
+});
 
 function dialogEffectEnabled(id: EffectId): boolean {
-  return editorModel.effects[props.layer.id]?.[id]?.enabled ?? false;
+  return editorModel.value.effects[props.layer.id]?.[id]?.enabled ?? false;
 }
 
 const dialogRoot = ref<HTMLElement | null>(null);
 const { isShaking, triggerShake } = useShake();
 
-const pos = ref({ x: 280, y: 80 });
 const dragging = ref(false);
 let dragStart = { x: 0, y: 0, px: 0, py: 0 };
 
@@ -49,20 +53,20 @@ function onHeaderPointerDown(e: PointerEvent) {
   if ((e.target as HTMLElement).closest("button, input, label")) return;
   dragging.value = true;
   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  const p = editorModel.value.ui.layerStyleDialog;
   dragStart = {
     x: e.clientX,
     y: e.clientY,
-    px: pos.value.x,
-    py: pos.value.y,
+    px: p.x,
+    py: p.y,
   };
 }
 
 function onHeaderPointerMove(e: PointerEvent) {
   if (!dragging.value) return;
-  pos.value = {
-    x: dragStart.px + (e.clientX - dragStart.x),
-    y: dragStart.py + (e.clientY - dragStart.y),
-  };
+  const p = editorModel.value.ui.layerStyleDialog;
+  p.x = dragStart.px + (e.clientX - dragStart.x);
+  p.y = dragStart.py + (e.clientY - dragStart.y);
 }
 
 function onHeaderPointerUp(e: PointerEvent) {
@@ -99,18 +103,29 @@ function selectEffect(id: EffectId) {
   selectedEffect.value = id;
 }
 
+function setGradientEditorOpen(open: boolean) {
+  editorModel.value.ui.gradientEditorOpen = open;
+}
+
 function onEffectCheckboxChange(id: EffectId, ev: Event) {
   const t = ev.target as HTMLInputElement;
   setLayerEffectFromDialog(props.layer.id, id, t.checked);
+  selectedEffect.value = id;
+  nextTick(() => {
+    document.getElementById(`layer-style-panel-${id}`)?.scrollIntoView({
+      block: "nearest",
+      behavior: "smooth",
+    });
+  });
 }
 
 /** Reactive stroke row for this layer (undefined until stroke is checked once). */
 const strokeState = computed(
-  () => editorModel.effects[props.layer.id]?.stroke as StrokeEffectState | undefined,
+  () => editorModel.value.effects[props.layer.id]?.stroke as StrokeEffectState | undefined,
 );
 
 function patchStroke(partial: Partial<Pick<StrokeEffectState, "sizePx" | "position" | "opacity" | "color">>) {
-  const s = editorModel.effects[props.layer.id]?.stroke as StrokeEffectState | undefined;
+  const s = editorModel.value.effects[props.layer.id]?.stroke as StrokeEffectState | undefined;
   if (!s?.initialized) return;
   Object.assign(s, partial);
 }
@@ -125,13 +140,13 @@ function onStrokeOpacityInput(e: Event) {
 }
 
 const colorOverlayState = computed(
-  () => editorModel.effects[props.layer.id]?.colorOverlay as ColorOverlayEffectState | undefined,
+  () => editorModel.value.effects[props.layer.id]?.colorOverlay as ColorOverlayEffectState | undefined,
 );
 
 function patchColorOverlay(
   partial: Partial<Pick<ColorOverlayEffectState, "opacity" | "color">>,
 ) {
-  const s = editorModel.effects[props.layer.id]?.colorOverlay as ColorOverlayEffectState | undefined;
+  const s = editorModel.value.effects[props.layer.id]?.colorOverlay as ColorOverlayEffectState | undefined;
   if (!s?.initialized) return;
   Object.assign(s, partial);
 }
@@ -146,7 +161,7 @@ function onColorOverlayOpacityInput(e: Event) {
 }
 
 const dropShadowState = computed(
-  () => editorModel.effects[props.layer.id]?.dropShadow as DropShadowEffectState | undefined,
+  () => editorModel.value.effects[props.layer.id]?.dropShadow as DropShadowEffectState | undefined,
 );
 
 function patchDropShadow(
@@ -154,7 +169,7 @@ function patchDropShadow(
     Pick<DropShadowEffectState, "opacity" | "angle" | "distancePx" | "spread" | "sizePx" | "color">
   >,
 ) {
-  const s = editorModel.effects[props.layer.id]?.dropShadow as DropShadowEffectState | undefined;
+  const s = editorModel.value.effects[props.layer.id]?.dropShadow as DropShadowEffectState | undefined;
   if (!s?.initialized) return;
   Object.assign(s, partial);
 }
@@ -178,7 +193,7 @@ function onDropShadowSpreadInput(e: Event) {
 }
 
 const innerShadowState = computed(
-  () => editorModel.effects[props.layer.id]?.innerShadow as InnerShadowEffectState | undefined,
+  () => editorModel.value.effects[props.layer.id]?.innerShadow as InnerShadowEffectState | undefined,
 );
 
 function patchInnerShadow(
@@ -186,7 +201,7 @@ function patchInnerShadow(
     Pick<InnerShadowEffectState, "color" | "opacity" | "angle" | "distancePx" | "choke" | "sizePx">
   >,
 ) {
-  const s = editorModel.effects[props.layer.id]?.innerShadow as InnerShadowEffectState | undefined;
+  const s = editorModel.value.effects[props.layer.id]?.innerShadow as InnerShadowEffectState | undefined;
   if (!s?.initialized) return;
   Object.assign(s, partial);
 }
@@ -210,13 +225,13 @@ function onInnerShadowChokeInput(e: Event) {
 }
 
 const innerGlowState = computed(
-  () => editorModel.effects[props.layer.id]?.innerGlow as InnerGlowEffectState | undefined,
+  () => editorModel.value.effects[props.layer.id]?.innerGlow as InnerGlowEffectState | undefined,
 );
 
 function patchInnerGlow(
   partial: Partial<Pick<InnerGlowEffectState, "color" | "opacity" | "source" | "choke" | "sizePx">>,
 ) {
-  const s = editorModel.effects[props.layer.id]?.innerGlow as InnerGlowEffectState | undefined;
+  const s = editorModel.value.effects[props.layer.id]?.innerGlow as InnerGlowEffectState | undefined;
   if (!s?.initialized) return;
   Object.assign(s, partial);
 }
@@ -240,13 +255,13 @@ function onInnerGlowChokeInput(e: Event) {
 }
 
 const outerGlowState = computed(
-  () => editorModel.effects[props.layer.id]?.outerGlow as OuterGlowEffectState | undefined,
+  () => editorModel.value.effects[props.layer.id]?.outerGlow as OuterGlowEffectState | undefined,
 );
 
 function patchOuterGlow(
   partial: Partial<Pick<OuterGlowEffectState, "color" | "opacity" | "spread" | "sizePx">>,
 ) {
-  const s = editorModel.effects[props.layer.id]?.outerGlow as OuterGlowEffectState | undefined;
+  const s = editorModel.value.effects[props.layer.id]?.outerGlow as OuterGlowEffectState | undefined;
   if (!s?.initialized) return;
   Object.assign(s, partial);
 }
@@ -270,7 +285,7 @@ function onOuterGlowSpreadInput(e: Event) {
 }
 
 const gradientOverlayState = computed(
-  () => editorModel.effects[props.layer.id]?.gradientOverlay as GradientOverlayEffectState | undefined,
+  () => editorModel.value.effects[props.layer.id]?.gradientOverlay as GradientOverlayEffectState | undefined,
 );
 
 function patchGradientOverlay(
@@ -278,7 +293,7 @@ function patchGradientOverlay(
     Pick<GradientOverlayEffectState, "opacity" | "style" | "angle" | "scale" | "reverse" | "stops">
   >,
 ) {
-  const s = editorModel.effects[props.layer.id]?.gradientOverlay as GradientOverlayEffectState | undefined;
+  const s = editorModel.value.effects[props.layer.id]?.gradientOverlay as GradientOverlayEffectState | undefined;
   if (!s?.initialized) return;
   Object.assign(s, partial);
 }
@@ -308,18 +323,16 @@ const gradientOverlayPreviewCss = computed(() => {
   return `linear-gradient(to right, ${s.map((x) => `${x.color} ${x.position * 100}%`).join(", ")})`;
 });
 
-const gradientEditorOpen = ref(false);
-
 function onGradientEditorApply(stops: GradientOverlayStop[]) {
   patchGradientOverlay({ stops: stops.map((x) => ({ ...x })) });
 }
 
 const blurState = computed(
-  () => editorModel.effects[props.layer.id]?.blur as BlurEffectState | undefined,
+  () => editorModel.value.effects[props.layer.id]?.blur as BlurEffectState | undefined,
 );
 
 function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
-  const s = editorModel.effects[props.layer.id]?.blur as BlurEffectState | undefined;
+  const s = editorModel.value.effects[props.layer.id]?.blur as BlurEffectState | undefined;
   if (!s?.initialized) return;
   Object.assign(s, partial);
 }
@@ -330,7 +343,10 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
     ref="dialogRoot"
     class="layer-style-dialog"
     :class="{ 'shake-anim': isShaking }"
-    :style="{ left: `${pos.x}px`, top: `${pos.y}px` }"
+    :style="{
+      left: `${editorModel.ui.layerStyleDialog.x}px`,
+      top: `${editorModel.ui.layerStyleDialog.y}px`,
+    }"
     @pointerdown.capture="onDialogPointerDown"
   >
     <header
@@ -377,7 +393,7 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
 
       <main class="options-column">
         <!-- Stroke -->
-        <section v-show="selectedEffect === 'stroke'" class="effect-panel">
+        <section id="layer-style-panel-stroke" v-show="selectedEffect === 'stroke'" class="effect-panel">
           <h2 class="panel-heading">Stroke</h2>
           <p v-if="!strokeState?.initialized" class="effect-hint">
             Check “Stroke” in the list to enable these options.
@@ -453,7 +469,7 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
         </section>
 
         <!-- Inner Shadow -->
-        <section v-show="selectedEffect === 'innerShadow'" class="effect-panel">
+        <section id="layer-style-panel-innerShadow" v-show="selectedEffect === 'innerShadow'" class="effect-panel">
           <h2 class="panel-heading">Inner Shadow</h2>
           <p v-if="!innerShadowState?.initialized" class="effect-hint">
             Check "Inner Shadow" in the list to enable these options.
@@ -570,7 +586,7 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
         </section>
 
         <!-- Inner Glow -->
-        <section v-show="selectedEffect === 'innerGlow'" class="effect-panel">
+        <section id="layer-style-panel-innerGlow" v-show="selectedEffect === 'innerGlow'" class="effect-panel">
           <h2 class="panel-heading">Inner Glow</h2>
           <p v-if="!innerGlowState?.initialized" class="effect-hint">
             Check "Inner Glow" in the list to enable these options.
@@ -671,7 +687,7 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
         </section>
 
         <!-- Color Overlay -->
-        <section v-show="selectedEffect === 'colorOverlay'" class="effect-panel">
+        <section id="layer-style-panel-colorOverlay" v-show="selectedEffect === 'colorOverlay'" class="effect-panel">
           <h2 class="panel-heading">Color Overlay</h2>
           <p v-if="!colorOverlayState?.initialized" class="effect-hint">
             Check “Color Overlay” in the list to enable these options.
@@ -709,7 +725,7 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
         </section>
 
         <!-- Gradient Overlay -->
-        <section v-show="selectedEffect === 'gradientOverlay'" class="effect-panel">
+        <section id="layer-style-panel-gradientOverlay" v-show="selectedEffect === 'gradientOverlay'" class="effect-panel">
           <h2 class="panel-heading">Gradient Overlay</h2>
           <p v-if="!gradientOverlayState?.initialized" class="effect-hint">
             Check "Gradient Overlay" in the list to enable these options.
@@ -718,7 +734,7 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
             <div class="field-row block">
               <span class="field-label">Gradient:</span>
               <div class="gradient-preview-bar" :style="{ background: gradientOverlayPreviewCss }" />
-              <button type="button" class="small-btn" @click="gradientEditorOpen = true">
+              <button type="button" class="small-btn" @click="setGradientEditorOpen(true)">
                 Edit Gradient…
               </button>
             </div>
@@ -806,7 +822,7 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
         </section>
 
         <!-- Outer Glow -->
-        <section v-show="selectedEffect === 'outerGlow'" class="effect-panel">
+        <section id="layer-style-panel-outerGlow" v-show="selectedEffect === 'outerGlow'" class="effect-panel">
           <h2 class="panel-heading">Outer Glow</h2>
           <p v-if="!outerGlowState?.initialized" class="effect-hint">
             Check "Outer Glow" in the list to enable these options.
@@ -884,7 +900,7 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
         </section>
 
         <!-- Drop Shadow -->
-        <section v-show="selectedEffect === 'dropShadow'" class="effect-panel">
+        <section id="layer-style-panel-dropShadow" v-show="selectedEffect === 'dropShadow'" class="effect-panel">
           <h2 class="panel-heading">Drop Shadow</h2>
           <p v-if="!dropShadowState?.initialized" class="effect-hint">
             Check "Drop Shadow" in the list to enable these options.
@@ -1001,7 +1017,7 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
         </section>
 
         <!-- Blur -->
-        <section v-show="selectedEffect === 'blur'" class="effect-panel">
+        <section id="layer-style-panel-blur" v-show="selectedEffect === 'blur'" class="effect-panel">
           <h2 class="panel-heading">Blur</h2>
           <p v-if="!blurState?.initialized" class="effect-hint">
             Check "Blur" in the list to enable these options.
@@ -1047,7 +1063,7 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
   </div>
 
   <GradientEditorDialog
-    :open="gradientEditorOpen"
+    :open="editorModel.ui.gradientEditorOpen"
     :initial-stops="
       gradientOverlayState?.stops ?? [
         { color: '#000000', position: 0 },
@@ -1055,7 +1071,7 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
       ]
     "
     @apply="onGradientEditorApply"
-    @close="gradientEditorOpen = false"
+    @close="setGradientEditorOpen(false)"
   />
 </template>
 

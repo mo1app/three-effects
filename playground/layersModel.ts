@@ -1,4 +1,4 @@
-import { reactive } from "vue";
+import { useStorage } from "@vueuse/core";
 
 /** Toolbar layer opacity; maps to {@link GroupEffects.opacity}. */
 export type LayerOpacityState = {
@@ -157,8 +157,26 @@ export const LAYER_EFFECTS_META: { id: EffectId; label: string; plus?: boolean }
   { id: "blur", label: "Blur" },
 ];
 
+export type PanelPosition = { x: number; y: number };
+
+/** Floating panel layout and open state (persisted). */
+export type PlaygroundUiState = {
+  layersPanel: PanelPosition;
+  layerStyleDialog: PanelPosition;
+  gradientEditor: PanelPosition;
+  /** Layer id for open Layer Style dialog, or `null`. */
+  layerStyleOpenLayerId: string | null;
+  gradientEditorOpen: boolean;
+  layersSelectedIndex: number;
+  layerStyleSelectedEffect: EffectId;
+};
+
 /** Per-effect state; parameterized effects use dedicated types. */
 export type EditorModel = {
+  /** Screen-space debug borders and labels on playground {@link EffectsGroup} instances. */
+  groupHelpersVisible: boolean;
+  /** Layers panel, dialogs, and open/selection state. */
+  ui: PlaygroundUiState;
   layers: LayerItem[];
   effects: Record<
     string,
@@ -184,32 +202,109 @@ const defaultLayerOpacity = (): LayerOpacityState => ({
   value: 1,
 });
 
-export const editorModel = reactive<EditorModel>({
-  layers: [
-    {
-      id: "group",
-      name: "cube",
-      color: "#00aa44",
-      visible: true,
-      opacity: defaultLayerOpacity(),
+function defaultPlaygroundUi(): PlaygroundUiState {
+  return {
+    layersPanel: { x: 16, y: 80 },
+    layerStyleDialog: { x: 280, y: 80 },
+    gradientEditor: { x: 120, y: 120 },
+    layerStyleOpenLayerId: null,
+    gradientEditorOpen: false,
+    layersSelectedIndex: 0,
+    layerStyleSelectedEffect: "stroke",
+  };
+}
+
+function layersShapeCompatible(stored: LayerItem[] | undefined, defaults: LayerItem[]): boolean {
+  if (!stored || stored.length !== defaults.length) return false;
+  return defaults.every((d, i) => stored[i]?.id === d.id);
+}
+
+function mergePlaygroundEditorState(stored: Partial<EditorModel>, defaults: EditorModel): EditorModel {
+  const merged: EditorModel = {
+    ...defaults,
+    ...stored,
+    layers: layersShapeCompatible(stored.layers, defaults.layers)
+      ? stored.layers!
+      : defaults.layers,
+    effects: { ...defaults.effects, ...stored.effects },
+    ui: {
+      ...defaults.ui,
+      ...stored.ui,
+      layersPanel: { ...defaults.ui.layersPanel, ...stored.ui?.layersPanel },
+      layerStyleDialog: { ...defaults.ui.layerStyleDialog, ...stored.ui?.layerStyleDialog },
+      gradientEditor: { ...defaults.ui.gradientEditor, ...stored.ui?.gradientEditor },
+      layerStyleOpenLayerId:
+        stored.ui?.layerStyleOpenLayerId !== undefined
+          ? stored.ui.layerStyleOpenLayerId
+          : defaults.ui.layerStyleOpenLayerId,
+      gradientEditorOpen:
+        stored.ui?.gradientEditorOpen ?? defaults.ui.gradientEditorOpen,
+      layersSelectedIndex:
+        typeof stored.ui?.layersSelectedIndex === "number"
+          ? stored.ui.layersSelectedIndex
+          : defaults.ui.layersSelectedIndex,
+      layerStyleSelectedEffect:
+        (stored.ui?.layerStyleSelectedEffect as EffectId | undefined) ??
+        defaults.ui.layerStyleSelectedEffect,
     },
-    {
-      id: "groupA",
-      name: "sphere A",
-      color: "#ff6600",
-      visible: true,
-      opacity: defaultLayerOpacity(),
-    },
-    {
-      id: "groupB",
-      name: "sphere B",
-      color: "#ff0066",
-      visible: true,
-      opacity: defaultLayerOpacity(),
-    },
-  ],
-  effects: {},
-});
+  };
+
+  const ui = merged.ui;
+  if (ui.layersSelectedIndex >= merged.layers.length) {
+    ui.layersSelectedIndex = Math.max(0, merged.layers.length - 1);
+  }
+  const ids = new Set(merged.layers.map((l) => l.id));
+  if (ui.layerStyleOpenLayerId && !ids.has(ui.layerStyleOpenLayerId)) {
+    ui.layerStyleOpenLayerId = null;
+    ui.gradientEditorOpen = false;
+  }
+
+  return merged;
+}
+
+function createDefaultEditorModel(): EditorModel {
+  return {
+    groupHelpersVisible: true,
+    ui: defaultPlaygroundUi(),
+    layers: [
+      {
+        id: "group",
+        name: "cube",
+        color: "#00aa44",
+        visible: true,
+        opacity: defaultLayerOpacity(),
+      },
+      {
+        id: "groupA",
+        name: "sphere A",
+        color: "#ff6600",
+        visible: true,
+        opacity: defaultLayerOpacity(),
+      },
+      {
+        id: "groupB",
+        name: "sphere B",
+        color: "#ff0066",
+        visible: true,
+        opacity: defaultLayerOpacity(),
+      },
+    ],
+    effects: {},
+  };
+}
+
+export const PLAYGROUND_STORAGE_KEY = "three-effects-playground" as const;
+
+/** Persisted in `localStorage` under {@link PLAYGROUND_STORAGE_KEY}. */
+export const editorModel = useStorage<EditorModel>(
+  PLAYGROUND_STORAGE_KEY,
+  createDefaultEditorModel(),
+  localStorage,
+  {
+    mergeDefaults: (stored, defaults) =>
+      mergePlaygroundEditorState(stored as Partial<EditorModel>, defaults),
+  },
+);
 
 export function getLayerEffectState(
   layerId: string,
@@ -225,19 +320,19 @@ export function getLayerEffectState(
   | GradientOverlayEffectState
   | BlurEffectState
   | undefined {
-  return editorModel.effects[layerId]?.[effectId];
+  return editorModel.value.effects[layerId]?.[effectId];
 }
 
 /** Returns drop shadow state when the effect row exists and is initialized. */
 export function getDropShadowState(layerId: string): DropShadowEffectState | undefined {
-  const s = editorModel.effects[layerId]?.dropShadow;
+  const s = editorModel.value.effects[layerId]?.dropShadow;
   if (!s || !("distancePx" in s) || !s.initialized) return undefined;
   return s as DropShadowEffectState;
 }
 
 /** Returns stroke state when the stroke effect row exists and is initialized. */
 export function getStrokeState(layerId: string): StrokeEffectState | undefined {
-  const s = editorModel.effects[layerId]?.stroke;
+  const s = editorModel.value.effects[layerId]?.stroke;
   if (!s || !("sizePx" in s) || !s.initialized) return undefined;
   return s as StrokeEffectState;
 }
@@ -248,12 +343,12 @@ export function setLayerEffectFromDialog(
   effectId: EffectId,
   enabled: boolean,
 ): void {
-  if (!editorModel.effects[layerId]) {
-    editorModel.effects[layerId] = {};
+  if (!editorModel.value.effects[layerId]) {
+    editorModel.value.effects[layerId] = {};
   }
   if (effectId === "stroke") {
-    const prev = editorModel.effects[layerId].stroke as StrokeEffectState | undefined;
-    editorModel.effects[layerId].stroke = {
+    const prev = editorModel.value.effects[layerId].stroke as StrokeEffectState | undefined;
+    editorModel.value.effects[layerId].stroke = {
       initialized: true,
       enabled,
       sizePx: prev?.sizePx ?? 12,
@@ -262,16 +357,16 @@ export function setLayerEffectFromDialog(
       color: prev?.color ?? "#000000",
     };
   } else if (effectId === "colorOverlay") {
-    const prev = editorModel.effects[layerId].colorOverlay as ColorOverlayEffectState | undefined;
-    editorModel.effects[layerId].colorOverlay = {
+    const prev = editorModel.value.effects[layerId].colorOverlay as ColorOverlayEffectState | undefined;
+    editorModel.value.effects[layerId].colorOverlay = {
       initialized: true,
       enabled,
       opacity: prev?.opacity ?? 0.35,
       color: prev?.color ?? "#ff0000",
     };
   } else if (effectId === "dropShadow") {
-    const prev = editorModel.effects[layerId].dropShadow as DropShadowEffectState | undefined;
-    editorModel.effects[layerId].dropShadow = {
+    const prev = editorModel.value.effects[layerId].dropShadow as DropShadowEffectState | undefined;
+    editorModel.value.effects[layerId].dropShadow = {
       initialized: true,
       enabled,
       opacity: prev?.opacity ?? 0.75,
@@ -282,8 +377,8 @@ export function setLayerEffectFromDialog(
       color: prev?.color ?? "#000000",
     };
   } else if (effectId === "innerShadow") {
-    const prev = editorModel.effects[layerId].innerShadow as InnerShadowEffectState | undefined;
-    editorModel.effects[layerId].innerShadow = {
+    const prev = editorModel.value.effects[layerId].innerShadow as InnerShadowEffectState | undefined;
+    editorModel.value.effects[layerId].innerShadow = {
       initialized: true,
       enabled,
       color: prev?.color ?? "#000000",
@@ -294,8 +389,8 @@ export function setLayerEffectFromDialog(
       sizePx: prev?.sizePx ?? 5,
     };
   } else if (effectId === "innerGlow") {
-    const prev = editorModel.effects[layerId].innerGlow as InnerGlowEffectState | undefined;
-    editorModel.effects[layerId].innerGlow = {
+    const prev = editorModel.value.effects[layerId].innerGlow as InnerGlowEffectState | undefined;
+    editorModel.value.effects[layerId].innerGlow = {
       initialized: true,
       enabled,
       color: prev?.color ?? "#ffffff",
@@ -305,8 +400,8 @@ export function setLayerEffectFromDialog(
       sizePx: prev?.sizePx ?? 5,
     };
   } else if (effectId === "outerGlow") {
-    const prev = editorModel.effects[layerId].outerGlow as OuterGlowEffectState | undefined;
-    editorModel.effects[layerId].outerGlow = {
+    const prev = editorModel.value.effects[layerId].outerGlow as OuterGlowEffectState | undefined;
+    editorModel.value.effects[layerId].outerGlow = {
       initialized: true,
       enabled,
       color: prev?.color ?? "#ffff00",
@@ -315,12 +410,12 @@ export function setLayerEffectFromDialog(
       sizePx: prev?.sizePx ?? 5,
     };
   } else if (effectId === "gradientOverlay") {
-    const prev = editorModel.effects[layerId].gradientOverlay as GradientOverlayEffectState | undefined;
+    const prev = editorModel.value.effects[layerId].gradientOverlay as GradientOverlayEffectState | undefined;
     const defaultStops: GradientOverlayStop[] = [
       { color: "#000000", position: 0 },
       { color: "#ffffff", position: 1 },
     ];
-    editorModel.effects[layerId].gradientOverlay = {
+    editorModel.value.effects[layerId].gradientOverlay = {
       initialized: true,
       enabled,
       opacity: prev?.opacity ?? 0.9,
@@ -331,30 +426,28 @@ export function setLayerEffectFromDialog(
       stops: prev?.stops ? prev.stops.map((s) => ({ ...s })) : defaultStops.map((s) => ({ ...s })),
     };
   } else if (effectId === "blur") {
-    const prev = editorModel.effects[layerId].blur as BlurEffectState | undefined;
-    editorModel.effects[layerId].blur = {
+    const prev = editorModel.value.effects[layerId].blur as BlurEffectState | undefined;
+    editorModel.value.effects[layerId].blur = {
       initialized: true,
       enabled,
       sizePx: prev?.sizePx ?? 10,
     };
-  } else {
-    editorModel.effects[layerId][effectId] = { initialized: true, enabled };
   }
 }
 
 /** Layers panel: eye on sub-row toggles enabled only (keeps row visible). */
 export function toggleLayerEffectEye(layerId: string, effectId: EffectId): void {
-  const s = editorModel.effects[layerId]?.[effectId];
+  const s = editorModel.value.effects[layerId]?.[effectId];
   if (!s?.initialized) return;
   s.enabled = !s.enabled;
 }
 
 export function initializedEffectsForLayer(layerId: string) {
   return LAYER_EFFECTS_META.filter((meta) => {
-    const st = editorModel.effects[layerId]?.[meta.id];
+    const st = editorModel.value.effects[layerId]?.[meta.id];
     return st?.initialized === true;
   }).map((meta) => {
-    const st = editorModel.effects[layerId]![meta.id]!;
+    const st = editorModel.value.effects[layerId]![meta.id]!;
     return {
       id: meta.id,
       label: meta.label,
@@ -370,6 +463,11 @@ export function effectsGroupEyeIsDim(layerId: string): boolean {
   return !list.every((e) => e.enabled);
 }
 
+/** Layers panel: toggle debug helpers (borders + labels) on all scene groups. */
+export function toggleGroupHelpers(): void {
+  editorModel.value.groupHelpersVisible = !editorModel.value.groupHelpersVisible;
+}
+
 /** Toggle all initialized effects on/off together (folder eye). */
 export function toggleEffectsGroupEye(layerId: string): void {
   const list = initializedEffectsForLayer(layerId);
@@ -377,7 +475,7 @@ export function toggleEffectsGroupEye(layerId: string): void {
   const allOn = list.every((e) => e.enabled);
   const next = !allOn;
   for (const e of list) {
-    const st = editorModel.effects[layerId]?.[e.id];
+    const st = editorModel.value.effects[layerId]?.[e.id];
     if (st) st.enabled = next;
   }
 }

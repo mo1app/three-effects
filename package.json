@@ -44,8 +44,10 @@
     "three": ">=0.160.0 <0.200.0"
   },
   "devDependencies": {
+    "@types/node": "^25.5.0",
     "@types/three": "^0.172.0",
     "@vitejs/plugin-vue": "^6.0.5",
+    "@vueuse/core": "^14.2.1",
     "three": "^0.172.0",
     "typescript": "^5.7.3",
     "vite": "^6.2.0",

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { sampleSerializedGradient, type SerializedGradientStop } from "three-effects";
+import { editorModel } from "../layersModel";
 
 const props = defineProps<{
   open: boolean;
@@ -15,7 +16,6 @@ const emit = defineEmits<{
 const draftStops = ref<SerializedGradientStop[]>([]);
 const selectedIndex = ref(0);
 
-const pos = ref({ x: 120, y: 120 });
 const dragging = ref(false);
 const draggingDial = ref(false);
 let dragStart = { x: 0, y: 0, px: 0, py: 0 };
@@ -54,15 +54,15 @@ function onHeaderPointerDown(e: PointerEvent) {
   if ((e.target as HTMLElement).closest("button")) return;
   draggingDial.value = true;
   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  dragStart = { x: e.clientX, y: e.clientY, px: pos.value.x, py: pos.value.y };
+  const p = editorModel.value.ui.gradientEditor;
+  dragStart = { x: e.clientX, y: e.clientY, px: p.x, py: p.y };
 }
 
 function onHeaderPointerMove(e: PointerEvent) {
   if (!draggingDial.value) return;
-  pos.value = {
-    x: dragStart.px + (e.clientX - dragStart.x),
-    y: dragStart.py + (e.clientY - dragStart.y),
-  };
+  const p = editorModel.value.ui.gradientEditor;
+  p.x = dragStart.px + (e.clientX - dragStart.x);
+  p.y = dragStart.py + (e.clientY - dragStart.y);
 }
 
 function onHeaderPointerUp(e: PointerEvent) {
@@ -153,7 +153,10 @@ function cancel() {
     >
       <div
         class="gradient-editor"
-        :style="{ left: `${pos.x}px`, top: `${pos.y}px` }"
+        :style="{
+          left: `${editorModel.ui.gradientEditor.x}px`,
+          top: `${editorModel.ui.gradientEditor.y}px`,
+        }"
         @pointerdown.stop
       >
         <header

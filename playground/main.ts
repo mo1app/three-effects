@@ -139,30 +139,30 @@ const layerObjects: Record<string, EffectsGroup> = {
 function syncEditorToGroupEffects() {
   for (const layerId of Object.keys(layerObjects)) {
     const g = layerObjects[layerId]!;
-    const stroke = editorModel.effects[layerId]?.stroke as
+    const stroke = editorModel.value.effects[layerId]?.stroke as
       | StrokeEffectState
       | undefined;
-    const colorOverlay = editorModel.effects[layerId]?.colorOverlay as
+    const colorOverlay = editorModel.value.effects[layerId]?.colorOverlay as
       | ColorOverlayEffectState
       | undefined;
-    const dropShadow = editorModel.effects[layerId]?.dropShadow as
+    const dropShadow = editorModel.value.effects[layerId]?.dropShadow as
       | DropShadowEffectState
       | undefined;
-    const innerShadow = editorModel.effects[layerId]?.innerShadow as
+    const innerShadow = editorModel.value.effects[layerId]?.innerShadow as
       | InnerShadowEffectState
       | undefined;
-    const innerGlow = editorModel.effects[layerId]?.innerGlow as
+    const innerGlow = editorModel.value.effects[layerId]?.innerGlow as
       | InnerGlowEffectState
       | undefined;
-    const outerGlow = editorModel.effects[layerId]?.outerGlow as
+    const outerGlow = editorModel.value.effects[layerId]?.outerGlow as
       | OuterGlowEffectState
       | undefined;
-    const gradientOverlay = editorModel.effects[layerId]?.gradientOverlay as
+    const gradientOverlay = editorModel.value.effects[layerId]?.gradientOverlay as
       | GradientOverlayEffectState
       | undefined;
-    const blur = editorModel.effects[layerId]?.blur as BlurEffectState | undefined;
+    const blur = editorModel.value.effects[layerId]?.blur as BlurEffectState | undefined;
 
-    const layerRow = editorModel.layers.find((l) => l.id === layerId);
+    const layerRow = editorModel.value.layers.find((l) => l.id === layerId);
 
     g.applyEffects((e: GroupEffects) => {
       if (layerRow) {
@@ -251,7 +251,7 @@ function syncEditorToGroupEffects() {
 }
 
 function toggleLayerVisibility(id: string) {
-  const entry = editorModel.layers.find((l) => l.id === id);
+  const entry = editorModel.value.layers.find((l) => l.id === id);
   if (!entry) return;
   entry.visible = !entry.visible;
   const obj = layerObjects[id];
@@ -265,6 +265,16 @@ if (uiRoot) {
 
 watch(editorModel, syncEditorToGroupEffects, { deep: true });
 syncEditorToGroupEffects();
+
+watch(
+  () => editorModel.value.groupHelpersVisible,
+  (visible) => {
+    for (const g of Object.values(layerObjects)) {
+      g.debug = visible;
+    }
+  },
+  { immediate: true },
+);
 
 function onResize() {
   const w = window.innerWidth;

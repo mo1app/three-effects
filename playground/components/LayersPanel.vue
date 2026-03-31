@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 import LayerStyleDialog from "./LayerStyleDialog.vue";
 import {
+  editorModel,
   effectsGroupEyeIsDim,
   initializedEffectsForLayer,
   toggleEffectsGroupEye,
+  toggleGroupHelpers,
   toggleLayerEffectEye,
   type LayerItem,
   type EffectId,
@@ -20,32 +22,49 @@ function toggleVisibility(id: string) {
   props.toggleLayerVisibility?.(id);
 }
 
-const selectedIndex = ref(0);
-const styleDialogLayer = ref<LayerItem | null>(null);
+const styleDialogLayer = computed(() => {
+  const id = editorModel.value.ui.layerStyleOpenLayerId;
+  if (!id) return null;
+  return props.layers.find((l) => l.id === id) ?? null;
+});
 const { isShaking, triggerShake } = useShake();
 const panelRoot = ref<HTMLElement | null>(null);
-const pos = ref({ x: 16, y: 80 });
 const dragging = ref(false);
 let dragStart = { x: 0, y: 0, px: 0, py: 0 };
+
+watch(
+  () => props.layers,
+  (layers) => {
+    const ui = editorModel.value.ui;
+    if (ui.layersSelectedIndex >= layers.length) {
+      ui.layersSelectedIndex = Math.max(0, layers.length - 1);
+    }
+    if (ui.layerStyleOpenLayerId && !layers.some((l) => l.id === ui.layerStyleOpenLayerId)) {
+      ui.layerStyleOpenLayerId = null;
+      ui.gradientEditorOpen = false;
+    }
+  },
+  { deep: true, immediate: true },
+);
 
 function onHeaderPointerDown(e: PointerEvent) {
   if ((e.target as HTMLElement).closest("button")) return;
   dragging.value = true;
   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  const p = editorModel.value.ui.layersPanel;
   dragStart = {
     x: e.clientX,
     y: e.clientY,
-    px: pos.value.x,
-    py: pos.value.y,
+    px: p.x,
+    py: p.y,
   };
 }
 
 function onHeaderPointerMove(e: PointerEvent) {
   if (!dragging.value) return;
-  pos.value = {
-    x: dragStart.px + (e.clientX - dragStart.x),
-    y: dragStart.py + (e.clientY - dragStart.y),
-  };
+  const p = editorModel.value.ui.layersPanel;
+  p.x = dragStart.px + (e.clientX - dragStart.x);
+  p.y = dragStart.py + (e.clientY - dragStart.y);
 }
 
 function onHeaderPointerUp(e: PointerEvent) {
@@ -72,15 +91,16 @@ function onPanelPointerDown(e: PointerEvent) {
 }
 
 function openStyleDialog(layer: LayerItem) {
-  styleDialogLayer.value = layer;
+  editorModel.value.ui.layerStyleOpenLayerId = layer.id;
 }
 
 function closeStyleDialog() {
-  styleDialogLayer.value = null;
+  editorModel.value.ui.layerStyleOpenLayerId = null;
+  editorModel.value.ui.gradientEditorOpen = false;
 }
 
 function openStyleDialogForSelection() {
-  const layer = props.layers[selectedIndex.value];
+  const layer = props.layers[editorModel.value.ui.layersSelectedIndex];
   if (layer) openStyleDialog(layer);
 }
 
@@ -96,7 +116,9 @@ function onEffectsGroupEye(layerId: string) {
   toggleEffectsGroupEye(layerId);
 }
 
-const selectedLayer = computed(() => props.layers[selectedIndex.value] ?? null);
+const selectedLayer = computed(
+  () => props.layers[editorModel.value.ui.layersSelectedIndex] ?? null,
+);
 
 function onOpacityEnabledChange(e: Event) {
   const layer = selectedLayer.value;
@@ -112,6 +134,55 @@ function onOpacityValueInput(e: Event) {
   layer.opacity.value = Math.min(100, Math.max(0, raw)) / 100;
   layer.opacity.enabled = true;
 }
+
+const opacityPopoverOpen = ref(false);
+const opacityPopoverRoot = ref<HTMLElement | null>(null);
+const opacitySliderTriggerRef = ref<HTMLElement | null>(null);
+let removeOpacityOutsideListener: (() => void) | null = null;
+
+function unbindOpacityOutsideClose() {
+  removeOpacityOutsideListener?.();
+  removeOpacityOutsideListener = null;
+}
+
+function bindOpacityOutsideClose() {
+  unbindOpacityOutsideClose();
+  requestAnimationFrame(() => {
+    const handler = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (opacityPopoverRoot.value?.contains(t) || opacitySliderTriggerRef.value?.contains(t)) return;
+      opacityPopoverOpen.value = false;
+    };
+    document.addEventListener("pointerdown", handler, true);
+    removeOpacityOutsideListener = () => document.removeEventListener("pointerdown", handler, true);
+  });
+}
+
+function toggleOpacitySliderPopover() {
+  if (!selectedLayer.value) {
+    triggerShake();
+    return;
+  }
+  opacityPopoverOpen.value = !opacityPopoverOpen.value;
+  if (opacityPopoverOpen.value) bindOpacityOutsideClose();
+  else unbindOpacityOutsideClose();
+}
+
+function onOpacitySliderInput(e: Event) {
+  const layer = selectedLayer.value;
+  if (!layer?.opacity) return;
+  const v = Number((e.target as HTMLInputElement).value);
+  if (Number.isNaN(v)) return;
+  layer.opacity.value = Math.min(100, Math.max(0, v)) / 100;
+  layer.opacity.enabled = true;
+}
+
+watch(selectedLayer, () => {
+  opacityPopoverOpen.value = false;
+  unbindOpacityOutsideClose();
+});
+
+onUnmounted(() => unbindOpacityOutsideClose());
 </script>
 
 <template>
@@ -124,7 +195,10 @@ function onOpacityValueInput(e: Event) {
     ref="panelRoot"
     class="layers-panel"
     :class="{ 'shake-anim': isShaking }"
-    :style="{ left: `${pos.x}px`, top: `${pos.y}px` }"
+    :style="{
+      left: `${editorModel.ui.layersPanel.x}px`,
+      top: `${editorModel.ui.layersPanel.y}px`,
+    }"
     @pointerdown.capture="onPanelPointerDown"
   >
     <header
@@ -135,12 +209,15 @@ function onOpacityValueInput(e: Event) {
       @pointercancel="onHeaderPointerUp"
     >
       <span class="tab-label">Layers</span>
-      <button type="button" class="icon-btn tab-close" title="Close" @click="noop">
-        ×
-      </button>
       <span class="header-spacer" />
-      <button type="button" class="icon-btn menu-btn" title="Panel options" @click="noop">
-        <span class="hamburger" />
+      <button
+        type="button"
+        class="helpers-btn"
+        :class="{ pressed: editorModel.groupHelpersVisible }"
+        :title="editorModel.groupHelpersVisible ? 'Hide group debug helpers' : 'Show group debug helpers'"
+        @click="toggleGroupHelpers"
+      >
+        Helpers
       </button>
     </header>
 
@@ -150,15 +227,17 @@ function onOpacityValueInput(e: Event) {
         <option>Multiply</option>
         <option>Screen</option>
       </select>
-      <label class="opacity-row">
-        <input
-          type="checkbox"
-          class="opacity-fx"
-          title="Layer opacity on/off"
-          :checked="selectedLayer?.opacity.enabled ?? false"
-          :disabled="!selectedLayer"
-          @change="onOpacityEnabledChange"
-        />
+      <div class="opacity-row opacity-row-wrap">
+        <label class="opacity-checkbox-label">
+          <input
+            type="checkbox"
+            class="opacity-fx"
+            title="Layer opacity on/off"
+            :checked="selectedLayer?.opacity.enabled ?? false"
+            :disabled="!selectedLayer"
+            @change="onOpacityEnabledChange"
+          />
+        </label>
         <span class="lbl">Opacity:</span>
         <input
           class="num-input opacity-value"
@@ -171,8 +250,33 @@ function onOpacityValueInput(e: Event) {
           @input="onOpacityValueInput"
         />
         <span class="pct-suffix">%</span>
-        <button type="button" class="arrow-btn" title="Slider" @click="noop">▾</button>
-      </label>
+        <button
+          ref="opacitySliderTriggerRef"
+          type="button"
+          class="arrow-btn"
+          title="Opacity slider"
+          @click.stop="toggleOpacitySliderPopover"
+        >
+          ▾
+        </button>
+        <div
+          v-show="opacityPopoverOpen"
+          ref="opacityPopoverRoot"
+          class="opacity-slider-popover"
+          @pointerdown.stop
+        >
+          <input
+            type="range"
+            class="opacity-slider-range"
+            min="0"
+            max="100"
+            step="1"
+            :value="Math.round((selectedLayer?.opacity.value ?? 1) * 100)"
+            :disabled="!selectedLayer"
+            @input="onOpacitySliderInput"
+          />
+        </div>
+      </div>
     </div>
 
     <div class="lock-row">
@@ -198,9 +302,9 @@ function onOpacityValueInput(e: Event) {
         <button
           type="button"
           class="layer-row"
-          :class="{ active: selectedIndex === i }"
+          :class="{ active: editorModel.ui.layersSelectedIndex === i }"
           role="listitem"
-          @click="selectedIndex = i"
+          @click="editorModel.ui.layersSelectedIndex = i"
           @dblclick.stop="openStyleDialog(layer)"
         >
           <span
@@ -307,13 +411,6 @@ function onOpacityValueInput(e: Event) {
   font-size: 11px;
 }
 
-.tab-close {
-  font-size: 14px;
-  line-height: 1;
-  padding: 0 4px;
-  min-width: 18px;
-}
-
 .header-spacer {
   flex: 1;
 }
@@ -332,14 +429,26 @@ function onOpacityValueInput(e: Event) {
   background: rgba(255, 255, 255, 0.2);
 }
 
-.hamburger {
-  display: block;
-  width: 12px;
-  height: 2px;
-  background: #222;
-  box-shadow:
-    0 4px 0 #222,
-    0 8px 0 #222;
+.helpers-btn {
+  pointer-events: auto;
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 10px;
+  color: #1a1a1a;
+  background: #d8d8d8;
+  border: 1px solid #5a5a5a;
+  border-radius: 2px;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.helpers-btn:hover {
+  background: #e4e4e4;
+}
+.helpers-btn.pressed {
+  background: #9a9a9a;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 
 .toolbar {
@@ -363,6 +472,39 @@ function onOpacityValueInput(e: Event) {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.opacity-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  cursor: default;
+}
+
+.opacity-row-wrap {
+  position: relative;
+}
+
+.opacity-slider-popover {
+  position: absolute;
+  right: 0;
+  left: auto;
+  top: calc(100% + 2px);
+  z-index: 50;
+  width: 160px;
+  padding: 6px 8px;
+  background: #8a8a8a;
+  border: 1px solid #3a3a3a;
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.opacity-slider-range {
+  width: 100%;
+  height: 6px;
+  accent-color: #c8d4e0;
+  cursor: pointer;
 }
 
 .opacity-fx {

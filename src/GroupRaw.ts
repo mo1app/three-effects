@@ -139,6 +139,7 @@ export class GroupRaw extends ThreeGroup {
   set debug(v: boolean) {
     this._debug = v;
     for (const q of this._debugBorder) q.visible = v;
+    this.debugGroup.visible = v;
   }
 
   private _effectsEnabled = false;
