@@ -38,6 +38,16 @@ describe("Group", () => {
     expect(g.effectsMaterial).not.toBeNull();
   });
 
+  it("commitEffects applies deferred applyEffects before the next preRenderEffects", () => {
+    g.applyEffects((e) => {
+      e.stroke.enabled = true;
+      e.stroke.sizePx = 20;
+    });
+    g.commitEffects();
+    expect(g.effects.stroke.sizePx).toBe(20);
+    expect(g.effectsMaterial).not.toBeNull();
+  });
+
   it("dispose runs without throwing", () => {
     expect(() => g.dispose()).not.toThrow();
   });

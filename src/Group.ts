@@ -283,6 +283,9 @@ export class Group extends GroupRaw {
    */
   private readonly _effectsMaterialCache = new Map<string, CachedEffectsMaterial>();
 
+  /** Set when `effects` change in a way that requires rebuilding `effectsMaterial`. Cleared when `GroupRaw.preRenderEffects` runs or when {@link commitEffects} is called. */
+  private _effectsDirty = false;
+
   constructor() {
     super();
     this._effectsTarget = createDefaultEffects();
@@ -294,12 +297,27 @@ export class Group extends GroupRaw {
   }
 
   /**
-   * Mutates the internal effects state and rebuilds `effectsMaterial` once.
-   * Prefer this over many assignments on {@link effects} when syncing from an
-   * external store (avoids one graph rebuild per field).
+   * Mutates the internal effects state (bypassing the reactive proxy) and marks
+   * the material stale. The shader graph is rebuilt on the next
+   * `GroupRaw.preRenderEffects` / `preRenderEffects` (or call {@link commitEffects} to sync immediately).
    */
   applyEffects(fn: (effects: GroupEffects) => void): void {
     fn(this._effectsTarget);
+    this._effectsDirty = true;
+  }
+
+  /**
+   * Rebuilds `effectsMaterial` now if any deferred changes are pending. Normally
+   * runs automatically inside `GroupRaw.preRenderEffects`; use this after bulk
+   * updates when you need the material before the next frame (e.g. tests).
+   */
+  commitEffects(): void {
+    this._flushDeferredEffectsSync();
+  }
+
+  protected override _flushDeferredEffectsSync(): void {
+    if (!this._effectsDirty) return;
+    this._effectsDirty = false;
     this._syncEffectsMaterial();
   }
 
@@ -325,7 +343,7 @@ export class Group extends GroupRaw {
       this._layerOpacityUniform.value = Math.min(1, Math.max(0, v));
       return;
     }
-    this._syncEffectsMaterial();
+    this._effectsDirty = true;
   }
 
   private _gradientTextureReferencedInCache(tex: DataTexture): boolean {

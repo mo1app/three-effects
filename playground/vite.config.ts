@@ -10,7 +10,7 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      "three-group-effects": resolve(playgroundDir, "../src/index.ts"),
+      "three-effects": resolve(playgroundDir, "../src/index.ts"),
     },
   },
   server: {

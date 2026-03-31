@@ -315,6 +315,13 @@ export class GroupRaw extends ThreeGroup {
   ): void {}
 
   /**
+   * Subclasses may override to commit deferred GPU work once per frame when
+   * the render-target size for this pass is known (see {@link Group}).
+   * @default No-op.
+   */
+  protected _flushDeferredEffectsSync(): void {}
+
+  /**
    * Distance from the camera to the world-space center of the content meshes’
    * axis-aligned bounds (same center used for {@link _computeNDCBounds} `ndcZ`).
    * Used to convert screen-pixel margins to NDC {@link padding} at the content depth.
@@ -594,6 +601,7 @@ export class GroupRaw extends ThreeGroup {
 
     if (outsideFrustum) {
       this._plane.visible = false;
+      this._flushDeferredEffectsSync();
       return;
     }
     this._plane.visible = true;
@@ -644,6 +652,8 @@ export class GroupRaw extends ThreeGroup {
       this._mapNode.value = this._target.texture;
       for (const n of this._secondaryNodes) n.value = this._target.texture;
     }
+
+    this._flushDeferredEffectsSync();
 
     // Hide every other effectsEnabled group's content from SHARED_LAYER so
     // this group renders in isolation. Restored after the offscreen pass.

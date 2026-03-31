@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { sampleSerializedGradient, type SerializedGradientStop } from "three-group-effects";
+import { sampleSerializedGradient, type SerializedGradientStop } from "three-effects";
 
 const props = defineProps<{
   open: boolean;

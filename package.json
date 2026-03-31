@@ -1,7 +1,7 @@
 {
-  "name": "three-group-effects",
+  "name": "three-effects",
   "version": "0.0.0",
-  "description": "",
+  "description": "Photoshop-style layer effects (drop shadow, stroke, glows, overlays) for Three.js WebGPU + TSL.",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -29,7 +29,16 @@
     "test": "vitest run",
     "prepublishOnly": "npm run build"
   },
-  "keywords": [],
+  "keywords": [
+    "three.js",
+    "three",
+    "webgpu",
+    "tsl",
+    "layer-styles",
+    "effects",
+    "drop-shadow",
+    "stroke"
+  ],
   "license": "MIT",
   "peerDependencies": {
     "three": ">=0.160.0 <0.200.0"
