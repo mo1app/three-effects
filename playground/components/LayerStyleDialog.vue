@@ -1,17 +1,27 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import {
   editorModel,
   LAYER_EFFECTS_META,
   setLayerEffectFromDialog,
+  type DropShadowEffectState,
   type EffectId,
+  type InnerGlowEffectState,
+  type InnerShadowEffectState,
   type LayerItem,
+  type ColorOverlayEffectState,
+  type GradientOverlayEffectState,
+  type GradientOverlayStop,
+  type OuterGlowEffectState,
+  type StrokeEffectState,
 } from "../layersModel";
 import {
   pointerHitsDisabledFormControl,
   pointerHitsReadonlyFieldNum,
   useShake,
 } from "../shake";
+import AngleDial from "./AngleDial.vue";
+import GradientEditorDialog from "./GradientEditorDialog.vue";
 
 const props = defineProps<{
   layer: LayerItem;
@@ -92,6 +102,216 @@ function onEffectCheckboxChange(id: EffectId, ev: Event) {
   const t = ev.target as HTMLInputElement;
   setLayerEffectFromDialog(props.layer.id, id, t.checked);
 }
+
+/** Reactive stroke row for this layer (undefined until stroke is checked once). */
+const strokeState = computed(
+  () => editorModel.effects[props.layer.id]?.stroke as StrokeEffectState | undefined,
+);
+
+function patchStroke(partial: Partial<Pick<StrokeEffectState, "sizePx" | "position" | "opacity" | "color">>) {
+  const s = editorModel.effects[props.layer.id]?.stroke as StrokeEffectState | undefined;
+  if (!s?.initialized) return;
+  Object.assign(s, partial);
+}
+
+const strokeOpacityPercent = computed({
+  get: () => Math.round((strokeState.value?.opacity ?? 1) * 100),
+  set: (v: number) => patchStroke({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
+});
+
+function onStrokeOpacityInput(e: Event) {
+  strokeOpacityPercent.value = Number((e.target as HTMLInputElement).value);
+}
+
+const colorOverlayState = computed(
+  () => editorModel.effects[props.layer.id]?.colorOverlay as ColorOverlayEffectState | undefined,
+);
+
+function patchColorOverlay(
+  partial: Partial<Pick<ColorOverlayEffectState, "opacity" | "color">>,
+) {
+  const s = editorModel.effects[props.layer.id]?.colorOverlay as ColorOverlayEffectState | undefined;
+  if (!s?.initialized) return;
+  Object.assign(s, partial);
+}
+
+const colorOverlayOpacityPercent = computed({
+  get: () => Math.round((colorOverlayState.value?.opacity ?? 1) * 100),
+  set: (v: number) => patchColorOverlay({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
+});
+
+function onColorOverlayOpacityInput(e: Event) {
+  colorOverlayOpacityPercent.value = Number((e.target as HTMLInputElement).value);
+}
+
+const dropShadowState = computed(
+  () => editorModel.effects[props.layer.id]?.dropShadow as DropShadowEffectState | undefined,
+);
+
+function patchDropShadow(
+  partial: Partial<
+    Pick<DropShadowEffectState, "opacity" | "angle" | "distancePx" | "spread" | "sizePx" | "color">
+  >,
+) {
+  const s = editorModel.effects[props.layer.id]?.dropShadow as DropShadowEffectState | undefined;
+  if (!s?.initialized) return;
+  Object.assign(s, partial);
+}
+
+const dropShadowOpacityPercent = computed({
+  get: () => Math.round((dropShadowState.value?.opacity ?? 0.75) * 100),
+  set: (v: number) => patchDropShadow({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
+});
+
+function onDropShadowOpacityInput(e: Event) {
+  dropShadowOpacityPercent.value = Number((e.target as HTMLInputElement).value);
+}
+
+const dropShadowSpreadPercent = computed({
+  get: () => Math.round((dropShadowState.value?.spread ?? 0) * 100),
+  set: (v: number) => patchDropShadow({ spread: Math.min(100, Math.max(0, v)) / 100 }),
+});
+
+function onDropShadowSpreadInput(e: Event) {
+  dropShadowSpreadPercent.value = Number((e.target as HTMLInputElement).value);
+}
+
+const innerShadowState = computed(
+  () => editorModel.effects[props.layer.id]?.innerShadow as InnerShadowEffectState | undefined,
+);
+
+function patchInnerShadow(
+  partial: Partial<
+    Pick<InnerShadowEffectState, "color" | "opacity" | "angle" | "distancePx" | "choke" | "sizePx">
+  >,
+) {
+  const s = editorModel.effects[props.layer.id]?.innerShadow as InnerShadowEffectState | undefined;
+  if (!s?.initialized) return;
+  Object.assign(s, partial);
+}
+
+const innerShadowOpacityPercent = computed({
+  get: () => Math.round((innerShadowState.value?.opacity ?? 0.6) * 100),
+  set: (v: number) => patchInnerShadow({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
+});
+
+function onInnerShadowOpacityInput(e: Event) {
+  innerShadowOpacityPercent.value = Number((e.target as HTMLInputElement).value);
+}
+
+const innerShadowChokePercent = computed({
+  get: () => Math.round((innerShadowState.value?.choke ?? 0) * 100),
+  set: (v: number) => patchInnerShadow({ choke: Math.min(100, Math.max(0, v)) / 100 }),
+});
+
+function onInnerShadowChokeInput(e: Event) {
+  innerShadowChokePercent.value = Number((e.target as HTMLInputElement).value);
+}
+
+const innerGlowState = computed(
+  () => editorModel.effects[props.layer.id]?.innerGlow as InnerGlowEffectState | undefined,
+);
+
+function patchInnerGlow(
+  partial: Partial<Pick<InnerGlowEffectState, "color" | "opacity" | "source" | "choke" | "sizePx">>,
+) {
+  const s = editorModel.effects[props.layer.id]?.innerGlow as InnerGlowEffectState | undefined;
+  if (!s?.initialized) return;
+  Object.assign(s, partial);
+}
+
+const innerGlowOpacityPercent = computed({
+  get: () => Math.round((innerGlowState.value?.opacity ?? 0.5) * 100),
+  set: (v: number) => patchInnerGlow({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
+});
+
+function onInnerGlowOpacityInput(e: Event) {
+  innerGlowOpacityPercent.value = Number((e.target as HTMLInputElement).value);
+}
+
+const innerGlowChokePercent = computed({
+  get: () => Math.round((innerGlowState.value?.choke ?? 0) * 100),
+  set: (v: number) => patchInnerGlow({ choke: Math.min(100, Math.max(0, v)) / 100 }),
+});
+
+function onInnerGlowChokeInput(e: Event) {
+  innerGlowChokePercent.value = Number((e.target as HTMLInputElement).value);
+}
+
+const outerGlowState = computed(
+  () => editorModel.effects[props.layer.id]?.outerGlow as OuterGlowEffectState | undefined,
+);
+
+function patchOuterGlow(
+  partial: Partial<Pick<OuterGlowEffectState, "color" | "opacity" | "spread" | "sizePx">>,
+) {
+  const s = editorModel.effects[props.layer.id]?.outerGlow as OuterGlowEffectState | undefined;
+  if (!s?.initialized) return;
+  Object.assign(s, partial);
+}
+
+const outerGlowOpacityPercent = computed({
+  get: () => Math.round((outerGlowState.value?.opacity ?? 0.8) * 100),
+  set: (v: number) => patchOuterGlow({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
+});
+
+function onOuterGlowOpacityInput(e: Event) {
+  outerGlowOpacityPercent.value = Number((e.target as HTMLInputElement).value);
+}
+
+const outerGlowSpreadPercent = computed({
+  get: () => Math.round((outerGlowState.value?.spread ?? 0) * 100),
+  set: (v: number) => patchOuterGlow({ spread: Math.min(100, Math.max(0, v)) / 100 }),
+});
+
+function onOuterGlowSpreadInput(e: Event) {
+  outerGlowSpreadPercent.value = Number((e.target as HTMLInputElement).value);
+}
+
+const gradientOverlayState = computed(
+  () => editorModel.effects[props.layer.id]?.gradientOverlay as GradientOverlayEffectState | undefined,
+);
+
+function patchGradientOverlay(
+  partial: Partial<
+    Pick<GradientOverlayEffectState, "opacity" | "style" | "angle" | "scale" | "reverse" | "stops">
+  >,
+) {
+  const s = editorModel.effects[props.layer.id]?.gradientOverlay as GradientOverlayEffectState | undefined;
+  if (!s?.initialized) return;
+  Object.assign(s, partial);
+}
+
+const gradientOverlayOpacityPercent = computed({
+  get: () => Math.round((gradientOverlayState.value?.opacity ?? 0.9) * 100),
+  set: (v: number) => patchGradientOverlay({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
+});
+
+function onGradientOverlayOpacityInput(e: Event) {
+  gradientOverlayOpacityPercent.value = Number((e.target as HTMLInputElement).value);
+}
+
+const gradientOverlayScalePercent = computed({
+  get: () => Math.round((gradientOverlayState.value?.scale ?? 1) * 100),
+  set: (v: number) => patchGradientOverlay({ scale: Math.min(400, Math.max(10, v)) / 100 }),
+});
+
+function onGradientOverlayScaleInput(e: Event) {
+  gradientOverlayScalePercent.value = Number((e.target as HTMLInputElement).value);
+}
+
+const gradientOverlayPreviewCss = computed(() => {
+  const st = gradientOverlayState.value?.stops;
+  if (!st || st.length === 0) return "linear-gradient(to right, #000, #fff)";
+  const s = [...st].sort((a, b) => a.position - b.position);
+  return `linear-gradient(to right, ${s.map((x) => `${x.color} ${x.position * 100}%`).join(", ")})`;
+});
+
+const gradientEditorOpen = ref(false);
+
+function onGradientEditorApply(stops: GradientOverlayStop[]) {
+  patchGradientOverlay({ stops: stops.map((x) => ({ ...x })) });
+}
 </script>
 
 <template>
@@ -148,370 +368,625 @@ function onEffectCheckboxChange(id: EffectId, ev: Event) {
         <!-- Stroke -->
         <section v-show="selectedEffect === 'stroke'" class="effect-panel">
           <h2 class="panel-heading">Stroke</h2>
-          <div class="field-row">
-            <span class="field-label">Size:</span>
-            <input class="slider" type="range" min="0" max="20" value="3" disabled />
-            <input class="field-num" type="text" value="3" readonly />
-            <span class="unit">px</span>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Position:</span>
-            <select class="field-select wide" disabled @change="noop">
-              <option>Outside</option>
-              <option>Inside</option>
-              <option>Center</option>
-            </select>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Blend Mode:</span>
-            <select class="field-select" disabled @change="noop">
-              <option>Normal</option>
-            </select>
-            <span class="swatch" style="background: #000" />
-          </div>
-          <div class="field-row">
-            <span class="field-label">Opacity:</span>
-            <input class="slider" type="range" min="0" max="100" value="100" disabled />
-            <input class="field-num" type="text" value="100%" readonly />
-          </div>
-          <div class="field-row">
-            <span class="field-label">Fill Type:</span>
-            <select class="field-select wide" disabled @change="noop">
-              <option>Color</option>
-              <option>Gradient</option>
-              <option>Pattern</option>
-            </select>
-          </div>
+          <p v-if="!strokeState?.initialized" class="effect-hint">
+            Check “Stroke” in the list to enable these options.
+          </p>
+          <template v-else>
+            <div class="field-row">
+              <span class="field-label">Size:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="64"
+                step="1"
+                :value="strokeState.sizePx"
+                @input="patchStroke({ sizePx: +($event.target as HTMLInputElement).value })"
+              />
+              <input
+                class="field-num"
+                type="number"
+                min="0"
+                max="256"
+                step="1"
+                :value="strokeState.sizePx"
+                @input="patchStroke({ sizePx: +($event.target as HTMLInputElement).value })"
+              />
+              <span class="unit">px</span>
+            </div>
+            <div class="field-row">
+              <span class="field-label">Position:</span>
+              <select
+                class="field-select wide"
+                :value="strokeState.position"
+                @change="
+                  patchStroke({
+                    position: ($event.target as HTMLSelectElement).value as StrokeEffectState['position'],
+                  })
+                "
+              >
+                <option value="outside">Outside</option>
+                <option value="inside">Inside</option>
+                <option value="center">Center</option>
+              </select>
+            </div>
+            <div class="field-row">
+              <span class="field-label">Color:</span>
+              <input
+                type="color"
+                class="color-input"
+                :value="strokeState.color"
+                title="Stroke color"
+                @input="patchStroke({ color: ($event.target as HTMLInputElement).value })"
+              />
+            </div>
+            <div class="field-row">
+              <span class="field-label">Opacity:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                :value="strokeOpacityPercent"
+                @input="onStrokeOpacityInput"
+              />
+              <input
+                class="field-num"
+                type="text"
+                :value="`${strokeOpacityPercent}%`"
+                readonly
+              />
+            </div>
+          </template>
         </section>
 
         <!-- Inner Shadow -->
         <section v-show="selectedEffect === 'innerShadow'" class="effect-panel">
           <h2 class="panel-heading">Inner Shadow</h2>
-          <div class="field-row">
-            <span class="field-label">Blend Mode:</span>
-            <select class="field-select" disabled @change="noop">
-              <option>Multiply</option>
-            </select>
-            <span class="swatch" style="background: #000" />
-          </div>
-          <div class="field-row">
-            <span class="field-label">Opacity:</span>
-            <input class="slider" type="range" min="0" max="100" value="75" disabled />
-            <input class="field-num" type="text" value="75%" readonly />
-          </div>
-          <div class="field-row angle-row">
-            <span class="field-label">Angle:</span>
-            <div class="angle-dial" aria-hidden="true" />
-            <input class="field-num narrow" type="text" value="120°" readonly />
-            <label class="inline-check">
-              <input type="checkbox" checked disabled />
-              Use Global Light
-            </label>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Distance:</span>
-            <input class="slider" type="range" min="0" max="50" value="5" disabled />
-            <input class="field-num" type="text" value="5" readonly />
-            <span class="unit">px</span>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Choke:</span>
-            <input class="slider" type="range" min="0" max="100" value="0" disabled />
-            <input class="field-num" type="text" value="0%" readonly />
-          </div>
-          <div class="field-row">
-            <span class="field-label">Size:</span>
-            <input class="slider" type="range" min="0" max="50" value="5" disabled />
-            <input class="field-num" type="text" value="5" readonly />
-            <span class="unit">px</span>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Contour:</span>
-            <span class="contour-thumb" />
-            <label class="inline-check">
-              <input type="checkbox" disabled />
-              Anti-aliased
-            </label>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Noise:</span>
-            <input class="slider" type="range" min="0" max="100" value="0" disabled />
-            <input class="field-num" type="text" value="0%" readonly />
-          </div>
+          <p v-if="!innerShadowState?.initialized" class="effect-hint">
+            Check "Inner Shadow" in the list to enable these options.
+          </p>
+          <template v-else>
+            <div class="field-row">
+              <span class="field-label">Color:</span>
+              <input
+                type="color"
+                class="color-input"
+                :value="innerShadowState.color"
+                title="Inner shadow color"
+                @input="patchInnerShadow({ color: ($event.target as HTMLInputElement).value })"
+              />
+            </div>
+            <div class="field-row">
+              <span class="field-label">Opacity:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                :value="innerShadowOpacityPercent"
+                @input="onInnerShadowOpacityInput"
+              />
+              <input
+                class="field-num"
+                type="text"
+                :value="`${innerShadowOpacityPercent}%`"
+                readonly
+              />
+            </div>
+            <div class="field-row angle-row">
+              <span class="field-label">Angle:</span>
+              <AngleDial
+                :model-value="innerShadowState.angle"
+                @update:model-value="patchInnerShadow({ angle: $event })"
+              />
+              <input
+                class="field-num narrow"
+                type="number"
+                min="0"
+                max="360"
+                step="1"
+                :value="innerShadowState.angle"
+                @input="patchInnerShadow({ angle: +($event.target as HTMLInputElement).value })"
+              />
+              <span class="unit">°</span>
+            </div>
+            <div class="field-row">
+              <span class="field-label">Distance:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="50"
+                step="1"
+                :value="innerShadowState.distancePx"
+                @input="patchInnerShadow({ distancePx: +($event.target as HTMLInputElement).value })"
+              />
+              <input
+                class="field-num"
+                type="number"
+                min="0"
+                max="50"
+                step="1"
+                :value="innerShadowState.distancePx"
+                @input="patchInnerShadow({ distancePx: +($event.target as HTMLInputElement).value })"
+              />
+              <span class="unit">px</span>
+            </div>
+            <div class="field-row">
+              <span class="field-label">Choke:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                :value="innerShadowChokePercent"
+                @input="onInnerShadowChokeInput"
+              />
+              <input
+                class="field-num"
+                type="text"
+                :value="`${innerShadowChokePercent}%`"
+                readonly
+              />
+            </div>
+            <div class="field-row">
+              <span class="field-label">Size:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="50"
+                step="1"
+                :value="innerShadowState.sizePx"
+                @input="patchInnerShadow({ sizePx: +($event.target as HTMLInputElement).value })"
+              />
+              <input
+                class="field-num"
+                type="number"
+                min="0"
+                max="50"
+                step="1"
+                :value="innerShadowState.sizePx"
+                @input="patchInnerShadow({ sizePx: +($event.target as HTMLInputElement).value })"
+              />
+              <span class="unit">px</span>
+            </div>
+          </template>
         </section>
 
         <!-- Inner Glow -->
         <section v-show="selectedEffect === 'innerGlow'" class="effect-panel">
           <h2 class="panel-heading">Inner Glow</h2>
-          <div class="field-row">
-            <span class="field-label">Blend Mode:</span>
-            <select class="field-select" disabled @change="noop">
-              <option>Screen</option>
-            </select>
-            <span class="swatch" style="background: #ffffff" />
-          </div>
-          <div class="field-row">
-            <span class="field-label">Opacity:</span>
-            <input class="slider" type="range" min="0" max="100" value="75" disabled />
-            <input class="field-num" type="text" value="75%" readonly />
-          </div>
-          <div class="field-row">
-            <span class="field-label">Noise:</span>
-            <input class="slider" type="range" min="0" max="100" value="0" disabled />
-            <input class="field-num" type="text" value="0%" readonly />
-          </div>
-          <div class="field-row radio-row">
-            <label><input type="radio" name="ig-src" checked disabled /> Color</label>
-            <label><input type="radio" name="ig-src" disabled /> Gradient</label>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Technique:</span>
-            <select class="field-select wide" disabled @change="noop">
-              <option>Softer</option>
-              <option>Precise</option>
-            </select>
-          </div>
-          <div class="field-row radio-row">
-            <span class="field-label">Source:</span>
-            <label><input type="radio" name="ig-edge" checked disabled /> Edge</label>
-            <label><input type="radio" name="ig-edge" disabled /> Center</label>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Choke:</span>
-            <input class="slider" type="range" min="0" max="100" value="0" disabled />
-            <input class="field-num" type="text" value="0%" readonly />
-          </div>
-          <div class="field-row">
-            <span class="field-label">Size:</span>
-            <input class="slider" type="range" min="0" max="50" value="5" disabled />
-            <input class="field-num" type="text" value="5" readonly />
-            <span class="unit">px</span>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Contour:</span>
-            <span class="contour-thumb" />
-            <label class="inline-check">
-              <input type="checkbox" disabled />
-              Anti-aliased
-            </label>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Range:</span>
-            <input class="slider" type="range" min="0" max="100" value="50" disabled />
-            <input class="field-num" type="text" value="50%" readonly />
-          </div>
-          <div class="field-row">
-            <span class="field-label">Jitter:</span>
-            <input class="slider" type="range" min="0" max="100" value="0" disabled />
-            <input class="field-num" type="text" value="0%" readonly />
-          </div>
+          <p v-if="!innerGlowState?.initialized" class="effect-hint">
+            Check "Inner Glow" in the list to enable these options.
+          </p>
+          <template v-else>
+            <div class="field-row">
+              <span class="field-label">Color:</span>
+              <input
+                type="color"
+                class="color-input"
+                :value="innerGlowState.color"
+                title="Inner glow color"
+                @input="patchInnerGlow({ color: ($event.target as HTMLInputElement).value })"
+              />
+            </div>
+            <div class="field-row">
+              <span class="field-label">Opacity:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                :value="innerGlowOpacityPercent"
+                @input="onInnerGlowOpacityInput"
+              />
+              <input
+                class="field-num"
+                type="text"
+                :value="`${innerGlowOpacityPercent}%`"
+                readonly
+              />
+            </div>
+            <div class="field-row radio-row">
+              <span class="field-label">Source:</span>
+              <label>
+                <input
+                  type="radio"
+                  :name="'ig-src-' + layer.id"
+                  value="edge"
+                  :checked="innerGlowState.source === 'edge'"
+                  @change="patchInnerGlow({ source: 'edge' })"
+                />
+                Edge
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  :name="'ig-src-' + layer.id"
+                  value="center"
+                  :checked="innerGlowState.source === 'center'"
+                  @change="patchInnerGlow({ source: 'center' })"
+                />
+                Center
+              </label>
+            </div>
+            <div class="field-row">
+              <span class="field-label">Choke:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                :value="innerGlowChokePercent"
+                @input="onInnerGlowChokeInput"
+              />
+              <input
+                class="field-num"
+                type="text"
+                :value="`${innerGlowChokePercent}%`"
+                readonly
+              />
+            </div>
+            <div class="field-row">
+              <span class="field-label">Size:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="50"
+                step="1"
+                :value="innerGlowState.sizePx"
+                @input="patchInnerGlow({ sizePx: +($event.target as HTMLInputElement).value })"
+              />
+              <input
+                class="field-num"
+                type="number"
+                min="0"
+                max="50"
+                step="1"
+                :value="innerGlowState.sizePx"
+                @input="patchInnerGlow({ sizePx: +($event.target as HTMLInputElement).value })"
+              />
+              <span class="unit">px</span>
+            </div>
+          </template>
         </section>
 
         <!-- Color Overlay -->
         <section v-show="selectedEffect === 'colorOverlay'" class="effect-panel">
           <h2 class="panel-heading">Color Overlay</h2>
-          <div class="field-row">
-            <span class="field-label">Blend Mode:</span>
-            <select class="field-select" disabled @change="noop">
-              <option>Normal</option>
-            </select>
-            <span class="swatch" :style="{ background: props.layer.color }" />
-          </div>
-          <div class="field-row">
-            <span class="field-label">Opacity:</span>
-            <input class="slider" type="range" min="0" max="100" value="100" disabled />
-            <input class="field-num" type="text" value="100%" readonly />
-          </div>
+          <p v-if="!colorOverlayState?.initialized" class="effect-hint">
+            Check “Color Overlay” in the list to enable these options.
+          </p>
+          <template v-else>
+            <div class="field-row">
+              <span class="field-label">Color:</span>
+              <input
+                type="color"
+                class="color-input"
+                :value="colorOverlayState.color"
+                title="Overlay color"
+                @input="patchColorOverlay({ color: ($event.target as HTMLInputElement).value })"
+              />
+            </div>
+            <div class="field-row">
+              <span class="field-label">Opacity:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                :value="colorOverlayOpacityPercent"
+                @input="onColorOverlayOpacityInput"
+              />
+              <input
+                class="field-num"
+                type="text"
+                :value="`${colorOverlayOpacityPercent}%`"
+                readonly
+              />
+            </div>
+          </template>
         </section>
 
         <!-- Gradient Overlay -->
         <section v-show="selectedEffect === 'gradientOverlay'" class="effect-panel">
           <h2 class="panel-heading">Gradient Overlay</h2>
-          <div class="field-row">
-            <span class="field-label">Blend Mode:</span>
-            <select class="field-select" disabled @change="noop">
-              <option>Normal</option>
-            </select>
-            <span class="swatch gradient-swatch" />
-          </div>
-          <div class="field-row">
-            <span class="field-label">Dither:</span>
-            <label class="inline-check">
-              <input type="checkbox" disabled />
-            </label>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Opacity:</span>
-            <input class="slider" type="range" min="0" max="100" value="100" disabled />
-            <input class="field-num" type="text" value="100%" readonly />
-          </div>
-          <div class="field-row block">
-            <span class="field-label">Gradient:</span>
-            <div class="gradient-bar" />
-          </div>
-          <div class="field-row">
-            <label class="inline-check">
-              <input type="checkbox" disabled />
-              Reverse
-            </label>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Style:</span>
-            <select class="field-select wide" disabled @change="noop">
-              <option>Linear</option>
-              <option>Radial</option>
-              <option>Angle</option>
-              <option>Reflected</option>
-              <option>Diamond</option>
-            </select>
-          </div>
-          <div class="field-row">
-            <label class="inline-check">
-              <input type="checkbox" checked disabled />
-              Align with Layer
-            </label>
-          </div>
-          <div class="field-row angle-row">
-            <span class="field-label">Angle:</span>
-            <div class="angle-dial" aria-hidden="true" />
-            <input class="field-num narrow" type="text" value="90°" readonly />
-          </div>
-          <div class="field-row">
-            <span class="field-label">Scale:</span>
-            <input class="slider" type="range" min="0" max="200" value="100" disabled />
-            <input class="field-num" type="text" value="100%" readonly />
-          </div>
-          <div class="field-row footer-btns">
-            <button type="button" class="small-btn" @click="noop">Reset Alignment</button>
-          </div>
-          <div class="field-row footer-btns">
-            <button type="button" class="small-btn" @click="noop">Make Default</button>
-            <button type="button" class="small-btn" @click="noop">Reset to Default</button>
-          </div>
+          <p v-if="!gradientOverlayState?.initialized" class="effect-hint">
+            Check "Gradient Overlay" in the list to enable these options.
+          </p>
+          <template v-else>
+            <div class="field-row block">
+              <span class="field-label">Gradient:</span>
+              <div class="gradient-preview-bar" :style="{ background: gradientOverlayPreviewCss }" />
+              <button type="button" class="small-btn" @click="gradientEditorOpen = true">
+                Edit Gradient…
+              </button>
+            </div>
+            <div class="field-row">
+              <span class="field-label">Opacity:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                :value="gradientOverlayOpacityPercent"
+                @input="onGradientOverlayOpacityInput"
+              />
+              <input
+                class="field-num"
+                type="text"
+                :value="`${gradientOverlayOpacityPercent}%`"
+                readonly
+              />
+            </div>
+            <div class="field-row">
+              <span class="field-label">Style:</span>
+              <select
+                class="field-select wide"
+                :value="gradientOverlayState.style"
+                @change="
+                  patchGradientOverlay({
+                    style: ($event.target as HTMLSelectElement).value as GradientOverlayEffectState['style'],
+                  })
+                "
+              >
+                <option value="linear">Linear</option>
+                <option value="radial">Radial</option>
+              </select>
+            </div>
+            <div class="field-row angle-row">
+              <span class="field-label">Angle:</span>
+              <AngleDial
+                :model-value="gradientOverlayState.angle"
+                @update:model-value="patchGradientOverlay({ angle: $event })"
+              />
+              <input
+                class="field-num narrow"
+                type="number"
+                min="0"
+                max="360"
+                step="1"
+                :value="gradientOverlayState.angle"
+                @input="patchGradientOverlay({ angle: +($event.target as HTMLInputElement).value })"
+              />
+              <span class="unit">°</span>
+            </div>
+            <div class="field-row">
+              <span class="field-label">Scale:</span>
+              <input
+                class="slider"
+                type="range"
+                min="10"
+                max="400"
+                step="1"
+                :value="gradientOverlayScalePercent"
+                @input="onGradientOverlayScaleInput"
+              />
+              <input
+                class="field-num"
+                type="text"
+                :value="`${gradientOverlayScalePercent}%`"
+                readonly
+              />
+            </div>
+            <div class="field-row">
+              <label class="inline-check full">
+                <input
+                  type="checkbox"
+                  :checked="gradientOverlayState.reverse"
+                  @change="
+                    patchGradientOverlay({ reverse: ($event.target as HTMLInputElement).checked })
+                  "
+                />
+                Reverse
+              </label>
+            </div>
+          </template>
         </section>
 
         <!-- Outer Glow -->
         <section v-show="selectedEffect === 'outerGlow'" class="effect-panel">
           <h2 class="panel-heading">Outer Glow</h2>
-          <div class="field-row">
-            <span class="field-label">Blend Mode:</span>
-            <select class="field-select" disabled @change="noop">
-              <option>Screen</option>
-            </select>
-            <span class="swatch" style="background: #ffffcc" />
-          </div>
-          <div class="field-row">
-            <span class="field-label">Opacity:</span>
-            <input class="slider" type="range" min="0" max="100" value="75" disabled />
-            <input class="field-num" type="text" value="75%" readonly />
-          </div>
-          <div class="field-row">
-            <span class="field-label">Noise:</span>
-            <input class="slider" type="range" min="0" max="100" value="0" disabled />
-            <input class="field-num" type="text" value="0%" readonly />
-          </div>
-          <div class="field-row radio-row">
-            <label><input type="radio" name="og-fill" checked disabled /> Color</label>
-            <label><input type="radio" name="og-fill" disabled /> Gradient</label>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Technique:</span>
-            <select class="field-select wide" disabled @change="noop">
-              <option>Softer</option>
-              <option>Precise</option>
-            </select>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Spread:</span>
-            <input class="slider" type="range" min="0" max="100" value="0" disabled />
-            <input class="field-num" type="text" value="0%" readonly />
-          </div>
-          <div class="field-row">
-            <span class="field-label">Size:</span>
-            <input class="slider" type="range" min="0" max="50" value="5" disabled />
-            <input class="field-num" type="text" value="5" readonly />
-            <span class="unit">px</span>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Contour:</span>
-            <span class="contour-thumb" />
-            <label class="inline-check">
-              <input type="checkbox" disabled />
-              Anti-aliased
-            </label>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Range:</span>
-            <input class="slider" type="range" min="0" max="100" value="50" disabled />
-            <input class="field-num" type="text" value="50%" readonly />
-          </div>
-          <div class="field-row">
-            <span class="field-label">Jitter:</span>
-            <input class="slider" type="range" min="0" max="100" value="0" disabled />
-            <input class="field-num" type="text" value="0%" readonly />
-          </div>
+          <p v-if="!outerGlowState?.initialized" class="effect-hint">
+            Check "Outer Glow" in the list to enable these options.
+          </p>
+          <template v-else>
+            <div class="field-row">
+              <span class="field-label">Color:</span>
+              <input
+                type="color"
+                class="color-input"
+                :value="outerGlowState.color"
+                title="Outer glow color"
+                @input="patchOuterGlow({ color: ($event.target as HTMLInputElement).value })"
+              />
+            </div>
+            <div class="field-row">
+              <span class="field-label">Opacity:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                :value="outerGlowOpacityPercent"
+                @input="onOuterGlowOpacityInput"
+              />
+              <input
+                class="field-num"
+                type="text"
+                :value="`${outerGlowOpacityPercent}%`"
+                readonly
+              />
+            </div>
+            <div class="field-row">
+              <span class="field-label">Spread:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                :value="outerGlowSpreadPercent"
+                @input="onOuterGlowSpreadInput"
+              />
+              <input
+                class="field-num"
+                type="text"
+                :value="`${outerGlowSpreadPercent}%`"
+                readonly
+              />
+            </div>
+            <div class="field-row">
+              <span class="field-label">Size:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="50"
+                step="1"
+                :value="outerGlowState.sizePx"
+                @input="patchOuterGlow({ sizePx: +($event.target as HTMLInputElement).value })"
+              />
+              <input
+                class="field-num"
+                type="number"
+                min="0"
+                max="50"
+                step="1"
+                :value="outerGlowState.sizePx"
+                @input="patchOuterGlow({ sizePx: +($event.target as HTMLInputElement).value })"
+              />
+              <span class="unit">px</span>
+            </div>
+          </template>
         </section>
 
         <!-- Drop Shadow -->
         <section v-show="selectedEffect === 'dropShadow'" class="effect-panel">
           <h2 class="panel-heading">Drop Shadow</h2>
-          <div class="field-row">
-            <span class="field-label">Blend Mode:</span>
-            <select class="field-select" disabled @change="noop">
-              <option>Multiply</option>
-            </select>
-            <span class="swatch" style="background: #000" />
-          </div>
-          <div class="field-row">
-            <span class="field-label">Opacity:</span>
-            <input class="slider" type="range" min="0" max="100" value="75" disabled />
-            <input class="field-num" type="text" value="75%" readonly />
-          </div>
-          <div class="field-row angle-row">
-            <span class="field-label">Angle:</span>
-            <div class="angle-dial" aria-hidden="true" />
-            <input class="field-num narrow" type="text" value="120°" readonly />
-            <label class="inline-check">
-              <input type="checkbox" checked disabled />
-              Use Global Light
-            </label>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Distance:</span>
-            <input class="slider" type="range" min="0" max="50" value="5" disabled />
-            <input class="field-num" type="text" value="5" readonly />
-            <span class="unit">px</span>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Spread:</span>
-            <input class="slider" type="range" min="0" max="100" value="0" disabled />
-            <input class="field-num" type="text" value="0%" readonly />
-          </div>
-          <div class="field-row">
-            <span class="field-label">Size:</span>
-            <input class="slider" type="range" min="0" max="50" value="5" disabled />
-            <input class="field-num" type="text" value="5" readonly />
-            <span class="unit">px</span>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Contour:</span>
-            <span class="contour-thumb" />
-            <label class="inline-check">
-              <input type="checkbox" disabled />
-              Anti-aliased
-            </label>
-          </div>
-          <div class="field-row">
-            <span class="field-label">Noise:</span>
-            <input class="slider" type="range" min="0" max="100" value="0" disabled />
-            <input class="field-num" type="text" value="0%" readonly />
-          </div>
-          <div class="field-row">
-            <label class="inline-check full">
-              <input type="checkbox" disabled />
-              Layer Knocks Out Drop Shadow
-            </label>
-          </div>
+          <p v-if="!dropShadowState?.initialized" class="effect-hint">
+            Check "Drop Shadow" in the list to enable these options.
+          </p>
+          <template v-else>
+            <div class="field-row">
+              <span class="field-label">Color:</span>
+              <input
+                type="color"
+                class="color-input"
+                :value="dropShadowState.color"
+                title="Shadow color"
+                @input="patchDropShadow({ color: ($event.target as HTMLInputElement).value })"
+              />
+            </div>
+            <div class="field-row">
+              <span class="field-label">Opacity:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                :value="dropShadowOpacityPercent"
+                @input="onDropShadowOpacityInput"
+              />
+              <input
+                class="field-num"
+                type="text"
+                :value="`${dropShadowOpacityPercent}%`"
+                readonly
+              />
+            </div>
+            <div class="field-row angle-row">
+              <span class="field-label">Angle:</span>
+              <AngleDial
+                :model-value="dropShadowState.angle"
+                @update:model-value="patchDropShadow({ angle: $event })"
+              />
+              <input
+                class="field-num narrow"
+                type="number"
+                min="0"
+                max="360"
+                step="1"
+                :value="dropShadowState.angle"
+                @input="patchDropShadow({ angle: +($event.target as HTMLInputElement).value })"
+              />
+              <span class="unit">°</span>
+            </div>
+            <div class="field-row">
+              <span class="field-label">Distance:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="50"
+                step="1"
+                :value="dropShadowState.distancePx"
+                @input="patchDropShadow({ distancePx: +($event.target as HTMLInputElement).value })"
+              />
+              <input
+                class="field-num"
+                type="number"
+                min="0"
+                max="50"
+                step="1"
+                :value="dropShadowState.distancePx"
+                @input="patchDropShadow({ distancePx: +($event.target as HTMLInputElement).value })"
+              />
+              <span class="unit">px</span>
+            </div>
+            <div class="field-row">
+              <span class="field-label">Spread:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                :value="dropShadowSpreadPercent"
+                @input="onDropShadowSpreadInput"
+              />
+              <input
+                class="field-num"
+                type="text"
+                :value="`${dropShadowSpreadPercent}%`"
+                readonly
+              />
+            </div>
+            <div class="field-row">
+              <span class="field-label">Size:</span>
+              <input
+                class="slider"
+                type="range"
+                min="0"
+                max="50"
+                step="1"
+                :value="dropShadowState.sizePx"
+                @input="patchDropShadow({ sizePx: +($event.target as HTMLInputElement).value })"
+              />
+              <input
+                class="field-num"
+                type="number"
+                min="0"
+                max="50"
+                step="1"
+                :value="dropShadowState.sizePx"
+                @input="patchDropShadow({ sizePx: +($event.target as HTMLInputElement).value })"
+              />
+              <span class="unit">px</span>
+            </div>
+          </template>
         </section>
       </main>
 
@@ -527,6 +1002,18 @@ function onEffectCheckboxChange(id: EffectId, ev: Event) {
       </aside>
     </div>
   </div>
+
+  <GradientEditorDialog
+    :open="gradientEditorOpen"
+    :initial-stops="
+      gradientOverlayState?.stops ?? [
+        { color: '#000000', position: 0 },
+        { color: '#ffffff', position: 1 },
+      ]
+    "
+    @apply="onGradientEditorApply"
+    @close="gradientEditorOpen = false"
+  />
 </template>
 
 <style scoped>
@@ -742,6 +1229,21 @@ function onEffectCheckboxChange(id: EffectId, ev: Event) {
   padding-bottom: 4px;
 }
 
+.effect-hint {
+  margin: 0;
+  color: #444;
+  font-size: 10px;
+}
+
+.color-input {
+  width: 28px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid #555;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
 .field-row {
   display: flex;
   align-items: center;
@@ -769,6 +1271,10 @@ function onEffectCheckboxChange(id: EffectId, ev: Event) {
   min-width: 60px;
   height: 4px;
   opacity: 0.85;
+}
+
+/* Mock sliders are disabled; keep them inert without blocking real stroke sliders. */
+.slider:disabled {
   pointer-events: none;
 }
 
@@ -782,7 +1288,7 @@ function onEffectCheckboxChange(id: EffectId, ev: Event) {
 }
 
 .field-num.narrow {
-  width: 40px;
+  width: 48px;
 }
 
 .field-select {
@@ -821,6 +1327,14 @@ function onEffectCheckboxChange(id: EffectId, ev: Event) {
   border: 1px solid #000;
   background: linear-gradient(90deg, #e02020, #20c020);
   margin-top: 2px;
+}
+
+.gradient-preview-bar {
+  width: 100%;
+  height: 22px;
+  border: 1px solid #1a1a1a;
+  margin: 4px 0;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
 .angle-row {
