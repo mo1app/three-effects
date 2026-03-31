@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import LayerStyleDialog from "./LayerStyleDialog.vue";
 import {
   effectsGroupEyeIsDim,
@@ -95,6 +95,23 @@ function onEffectEye(layerId: string, effectId: EffectId) {
 function onEffectsGroupEye(layerId: string) {
   toggleEffectsGroupEye(layerId);
 }
+
+const selectedLayer = computed(() => props.layers[selectedIndex.value] ?? null);
+
+function onOpacityEnabledChange(e: Event) {
+  const layer = selectedLayer.value;
+  if (!layer?.opacity) return;
+  layer.opacity.enabled = (e.target as HTMLInputElement).checked;
+}
+
+function onOpacityValueInput(e: Event) {
+  const layer = selectedLayer.value;
+  if (!layer?.opacity) return;
+  const raw = parseFloat((e.target as HTMLInputElement).value);
+  if (Number.isNaN(raw)) return;
+  layer.opacity.value = Math.min(100, Math.max(0, raw)) / 100;
+  layer.opacity.enabled = true;
+}
 </script>
 
 <template>
@@ -134,8 +151,26 @@ function onEffectsGroupEye(layerId: string) {
         <option>Screen</option>
       </select>
       <label class="opacity-row">
+        <input
+          type="checkbox"
+          class="opacity-fx"
+          title="Layer opacity on/off"
+          :checked="selectedLayer?.opacity.enabled ?? false"
+          :disabled="!selectedLayer"
+          @change="onOpacityEnabledChange"
+        />
         <span class="lbl">Opacity:</span>
-        <input class="num-input" type="text" value="100%" readonly @click="noop" />
+        <input
+          class="num-input opacity-value"
+          type="number"
+          min="0"
+          max="100"
+          step="1"
+          :value="Math.round((selectedLayer?.opacity.value ?? 1) * 100)"
+          :disabled="!selectedLayer || !selectedLayer.opacity.enabled"
+          @input="onOpacityValueInput"
+        />
+        <span class="pct-suffix">%</span>
         <button type="button" class="arrow-btn" title="Slider" @click="noop">▾</button>
       </label>
     </div>
@@ -328,6 +363,23 @@ function onEffectsGroupEye(layerId: string) {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.opacity-fx {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.pct-suffix {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: #222;
+}
+
+.opacity-value {
+  flex: 0 1 48px;
 }
 
 .lbl {

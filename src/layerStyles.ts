@@ -8,6 +8,7 @@ import {
   length,
   max,
   mix,
+  mul,
   sin,
   smoothstep,
   step,
@@ -170,6 +171,14 @@ export interface InnerGlowOptions {
  * true Euclidean distance field, yielding clean stroke edges and circular arcs at
  * convex corners (matching Photoshop's stroke rendering).
  */
+/**
+ * Layer-wide opacity: multiplies final RGB and alpha after all other styles (Photoshop layer opacity).
+ */
+export interface OpacityOptions {
+  /** `0…1`. @default `1` */
+  value: number;
+}
+
 export interface StrokeOptions {
   /** Stroke color. @default `#000000` */
   color?: Color;
@@ -209,7 +218,8 @@ export interface StrokeOptions {
 /**
  * Fluent builder for Photoshop-inspired layer styles as a single TSL `vec4` color node.
  * Effects are composited in **fixed** order (Photoshop stack): drop shadow → outer glow
- * → content + overlays → inner shadow → inner glow → stroke. Omitted methods stay off.
+ * → content + overlays → inner shadow → inner glow → stroke → optional layer opacity.
+ * Omitted methods stay off.
  *
  * @example
  * ```ts
@@ -228,6 +238,7 @@ export class LayerStylesBuilder {
   private _innerShadow?: InnerShadowOptions;
   private _innerGlow?: InnerGlowOptions;
   private _stroke?: StrokeOptions;
+  private _opacity?: OpacityOptions;
 
   private _cachedNode: ReturnType<typeof vec4> | null = null;
 
@@ -284,6 +295,13 @@ export class LayerStylesBuilder {
     return this;
   }
 
+  /** Multiply final RGB and alpha by a single factor (layer opacity). */
+  opacity(opts: OpacityOptions): this {
+    this._opacity = opts;
+    this._cachedNode = null;
+    return this;
+  }
+
   /**
    * Final `vec4` node: `rgb` = composited color, `a` = union of relevant alphas.
    * Assign to `MeshBasicNodeMaterial.colorNode`.
@@ -308,6 +326,7 @@ export class LayerStylesBuilder {
     const ins = this._innerShadow;
     const ig = this._innerGlow;
     const st = this._stroke;
+    const op = this._opacity;
 
     // ── Drop shadow ───────────────────────────────────────────────────────
     const dsColor = uniform(new Color(ds?.color ?? 0x000000));
@@ -494,6 +513,14 @@ export class LayerStylesBuilder {
     outA = max(outA, innerShadowMask);
     outA = max(outA, innerGlowMask);
     outA = max(outA, strokeMask);
+
+    // ── Layer opacity (after full stack) ──────────────────────────────────
+    if (op) {
+      // `uniform()` takes a CPU-side scalar; TSL `clamp()` returns a node — do not pass that here.
+      const opScalar = Math.min(1, Math.max(0, op.value ?? 1));
+      const opU = uniform(opScalar);
+      return vec4(mul(rgb, opU), mul(outA, opU));
+    }
 
     return vec4(rgb, outA);
   }

@@ -10,6 +10,7 @@ export type {
   GroupEffectsGradientOverlay,
   GroupEffectsInnerShadow,
   GroupEffectsInnerGlow,
+  GroupEffectsOpacity,
 } from "./Group.js";
 export { layerStyles, LayerStylesBuilder } from "./layerStyles.js";
 export type {
@@ -20,6 +21,7 @@ export type {
   InnerShadowOptions,
   InnerGlowOptions,
   StrokeOptions,
+  OpacityOptions,
 } from "./layerStyles.js";
 export {
   createGradientTexture,

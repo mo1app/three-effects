@@ -160,7 +160,14 @@ function syncEditorToGroupEffects() {
       | GradientOverlayEffectState
       | undefined;
 
+    const layerRow = editorModel.layers.find((l) => l.id === layerId);
+
     g.applyEffects((e: GroupEffects) => {
+      if (layerRow) {
+        e.opacity.enabled = layerRow.opacity.enabled;
+        e.opacity.value = layerRow.opacity.value;
+      }
+
       const useStroke = stroke?.initialized && stroke.enabled;
       e.stroke.enabled = !!useStroke;
       if (stroke?.initialized) {

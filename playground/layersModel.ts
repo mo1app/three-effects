@@ -1,10 +1,18 @@
 import { reactive } from "vue";
 
+/** Toolbar layer opacity; maps to {@link GroupEffects.opacity}. */
+export type LayerOpacityState = {
+  enabled: boolean;
+  /** 0–1 */
+  value: number;
+};
+
 export type LayerItem = {
   id: string;
   name: string;
   color: string;
   visible: boolean;
+  opacity: LayerOpacityState;
 };
 
 export type EffectId =
@@ -162,11 +170,34 @@ export type EditorModel = {
   >;
 };
 
+const defaultLayerOpacity = (): LayerOpacityState => ({
+  enabled: true,
+  value: 1,
+});
+
 export const editorModel = reactive<EditorModel>({
   layers: [
-    { id: "group", name: "cube", color: "#00aa44", visible: true },
-    { id: "groupA", name: "sphere A", color: "#ff6600", visible: true },
-    { id: "groupB", name: "sphere B", color: "#ff0066", visible: true },
+    {
+      id: "group",
+      name: "cube",
+      color: "#00aa44",
+      visible: true,
+      opacity: defaultLayerOpacity(),
+    },
+    {
+      id: "groupA",
+      name: "sphere A",
+      color: "#ff6600",
+      visible: true,
+      opacity: defaultLayerOpacity(),
+    },
+    {
+      id: "groupB",
+      name: "sphere B",
+      color: "#ff0066",
+      visible: true,
+      opacity: defaultLayerOpacity(),
+    },
   ],
   effects: {},
 });

@@ -86,6 +86,13 @@ export type GroupEffectsInnerGlow = {
   color: Color;
 };
 
+/** Layer-wide opacity after all other styles (multiplies RGB and alpha). */
+export type GroupEffectsOpacity = {
+  enabled: boolean;
+  /** `0…1` */
+  value: number;
+};
+
 /**
  * Reactive layer-style configuration for {@link Group}. Each block has an
  * `enabled` flag and parameters aligned with {@link layerStyles}.
@@ -98,6 +105,7 @@ export type GroupEffects = {
   gradientOverlay: GroupEffectsGradientOverlay;
   innerShadow: GroupEffectsInnerShadow;
   innerGlow: GroupEffectsInnerGlow;
+  opacity: GroupEffectsOpacity;
 };
 
 function createDefaultEffects(): GroupEffects {
@@ -158,6 +166,10 @@ function createDefaultEffects(): GroupEffects {
       choke: 0,
       sizePx: 8,
       color: new Color(0xffffff),
+    },
+    opacity: {
+      enabled: true,
+      value: 1,
     },
   };
 }
@@ -285,7 +297,7 @@ export class Group extends GroupRaw {
     const prev = this.effectsMaterial;
     const e = this._effectsTarget;
 
-    const any =
+    const hasStyleEffects =
       e.stroke.enabled ||
       e.dropShadow.enabled ||
       e.outerGlow.enabled ||
@@ -293,6 +305,8 @@ export class Group extends GroupRaw {
       e.gradientOverlay.enabled ||
       e.innerShadow.enabled ||
       e.innerGlow.enabled;
+    const opacityActive = e.opacity.enabled && e.opacity.value < 1;
+    const any = hasStyleEffects || opacityActive;
 
     if (!any) {
       this._gradientTexture?.dispose();
@@ -390,6 +404,9 @@ export class Group extends GroupRaw {
         position: e.stroke.position,
         size: this._strokeSizeUniform,
       });
+    }
+    if (e.opacity.enabled && e.opacity.value < 1) {
+      b = b.opacity({ value: e.opacity.value });
     }
 
     mat.colorNode = b.node as MeshBasicNodeMaterial["colorNode"];
