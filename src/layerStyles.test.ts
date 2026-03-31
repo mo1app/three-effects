@@ -70,6 +70,16 @@ describe("layerStyles", () => {
     expect(b.node).toBeDefined();
   });
 
+  it("chains blur on source then opacity without throwing", () => {
+    const g = new Group();
+    const node = layerStyles(g)
+      .blur({ radius: 2, sigma: 8 })
+      .opacity({ value: 0.8 })
+      .node;
+    expect(node).toBeDefined();
+    expect(typeof node).toBe("object");
+  });
+
   it("chains full style stack without throwing", () => {
     const g = new Group();
     const tex = createGradientTexture(

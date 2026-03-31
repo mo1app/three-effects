@@ -48,6 +48,29 @@ describe("Group", () => {
     expect(g.effectsMaterial).not.toBeNull();
   });
 
+  it("applyEffects enables blur and builds blur final material", () => {
+    g.applyEffects((e) => {
+      e.blur.enabled = true;
+      e.blur.sizePx = 12;
+    });
+    g.commitEffects();
+    expect(g.effects.blur.sizePx).toBe(12);
+    expect(g.effectsMaterial).not.toBeNull();
+  });
+
+  it("toggles blur off after on and keeps a material", () => {
+    g.applyEffects((e) => {
+      e.blur.enabled = true;
+      e.blur.sizePx = 6;
+    });
+    g.commitEffects();
+    g.applyEffects((e) => {
+      e.blur.enabled = false;
+    });
+    g.commitEffects();
+    expect(g.effectsMaterial).not.toBeNull();
+  });
+
   it("dispose runs without throwing", () => {
     expect(() => g.dispose()).not.toThrow();
   });
