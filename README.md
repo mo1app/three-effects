@@ -1,8 +1,10 @@
 # three-effects
 
-Photoshop-style **layer effects** for [Three.js](https://threejs.org/) **WebGPU**: drop shadow, outer glow, strokes, inner shadow / glow, overlays, a **layer blur** (full composite, before opacity), and layer opacity—implemented with **TSL** (Three Shading Language) and a **Jump Flooding Algorithm (JFA)** for crisp, screen-space strokes.
+Photoshop-style **layer effects** for [Three.js](https://threejs.org/) **WebGPU**: stroke, drop shadow, outer glow, inner shadow / glow, overlays, a **layer blur**.
 
-## Quick start (`Group`)
+**[GitHub repo](https://github.com/mo1app/three-effects) · [npm Package](https://www.npmjs.com/package/three-effects) · [Live Demo](https://three-effects.mo1.app)**
+
+## Quick start
 
 1. User **`Group`** from **`three-effects`** as a **`THREE.Group`** replacement.
 2. Configure the **`group.effects`**: each effect block needs to be manually **`enabled`**, and exposes parameters to be adjusted (see all below).
