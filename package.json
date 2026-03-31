@@ -26,6 +26,7 @@
     "dev": "vite --config playground/vite.config.ts",
     "dev:lib": "vite build --watch",
     "build": "vite build && tsc -p tsconfig.build.json",
+    "test": "vitest run",
     "prepublishOnly": "npm run build"
   },
   "keywords": [],
@@ -39,6 +40,7 @@
     "three": "^0.172.0",
     "typescript": "^5.7.3",
     "vite": "^6.2.0",
+    "vitest": "^3.2.4",
     "vue": "^3.5.31"
   }
 }

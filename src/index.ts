@@ -1,4 +1,5 @@
 export { Group } from "./Group.js";
+export { effectsMaterialCacheKey, RT_FALLBACK } from "./effectsMaterialCacheKey.js";
 export { GroupRaw, preRenderEffects } from "./GroupRaw.js";
 export type { RendererLike } from "./GroupRaw.js";
 export type {

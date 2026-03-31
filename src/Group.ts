@@ -13,6 +13,10 @@ import {
   createGradientTexture,
   type SerializedGradientStop,
 } from "./gradientTexture.js";
+import {
+  effectsMaterialCacheKey,
+  RT_FALLBACK,
+} from "./effectsMaterialCacheKey.js";
 
 // ─── sigma defaults (match layerStyles / playground) ─────────────────────────
 
@@ -20,13 +24,8 @@ const DS_SIGMA = 12;
 const IS_SIGMA = 8;
 const IG_SIGMA = 8;
 const OG_SIGMA = 8;
-const RT_FALLBACK = 200;
 
 const EFFECTS_MAT_CACHE_MAX = 8;
-
-function round4(n: number): number {
-  return Math.round(n * 10000) / 10000;
-}
 
 /** LRU value: material + gradient texture owned by that graph (if any). */
 type CachedEffectsMaterial = {
@@ -329,98 +328,6 @@ export class Group extends GroupRaw {
     this._syncEffectsMaterial();
   }
 
-  /** Serialize enabled effect parameters for cache lookup (`stroke.sizePx` and `effects.opacity.value` excluded — live uniforms). */
-  private _effectsMaterialCacheKey(e: GroupEffects, rtW: number): string {
-    const w = rtW > 0 ? rtW : RT_FALLBACK;
-    const r = round4;
-
-    const hasStyleEffects =
-      e.stroke.enabled ||
-      e.dropShadow.enabled ||
-      e.outerGlow.enabled ||
-      e.colorOverlay.enabled ||
-      e.gradientOverlay.enabled ||
-      e.innerShadow.enabled ||
-      e.innerGlow.enabled;
-    const layerOpacityOn = e.opacity.enabled;
-
-    if (!hasStyleEffects && !layerOpacityOn) {
-      return JSON.stringify({ p: 1 });
-    }
-    if (!hasStyleEffects && layerOpacityOn) {
-      return JSON.stringify({ lo: 1 });
-    }
-
-    const o: Record<string, unknown> = { rtW: w };
-    if (e.dropShadow.enabled) {
-      o.ds = {
-        c: e.dropShadow.color.getHexString(),
-        o: r(e.dropShadow.opacity),
-        a: r(e.dropShadow.angle),
-        d: r(e.dropShadow.distancePx),
-        sp: r(e.dropShadow.spread),
-        sz: r(e.dropShadow.sizePx),
-      };
-    }
-    if (e.outerGlow.enabled) {
-      o.og = {
-        c: e.outerGlow.color.getHexString(),
-        o: r(e.outerGlow.opacity),
-        sp: r(e.outerGlow.spread),
-        sz: r(e.outerGlow.sizePx),
-      };
-    }
-    if (e.colorOverlay.enabled) {
-      o.co = {
-        c: e.colorOverlay.color.getHexString(),
-        o: r(e.colorOverlay.opacity),
-      };
-    }
-    if (e.gradientOverlay.enabled && e.gradientOverlay.stops.length > 0) {
-      o.go = {
-        style: e.gradientOverlay.style,
-        o: r(e.gradientOverlay.opacity),
-        angle: r(e.gradientOverlay.angle),
-        scale: r(e.gradientOverlay.scale),
-        reverse: e.gradientOverlay.reverse,
-        stops: e.gradientOverlay.stops.map((s) => ({
-          c: s.color,
-          p: r(s.position),
-        })),
-      };
-    }
-    if (e.innerShadow.enabled) {
-      o.ins = {
-        c: e.innerShadow.color.getHexString(),
-        o: r(e.innerShadow.opacity),
-        a: r(e.innerShadow.angle),
-        d: r(e.innerShadow.distancePx),
-        ch: r(e.innerShadow.choke),
-        sz: r(e.innerShadow.sizePx),
-      };
-    }
-    if (e.innerGlow.enabled) {
-      o.ig = {
-        c: e.innerGlow.color.getHexString(),
-        o: r(e.innerGlow.opacity),
-        source: e.innerGlow.source,
-        ch: r(e.innerGlow.choke),
-        sz: r(e.innerGlow.sizePx),
-      };
-    }
-    if (e.stroke.enabled) {
-      o.st = {
-        p: e.stroke.position,
-        o: r(e.stroke.opacity),
-        c: e.stroke.color.getHexString(),
-      };
-    }
-    if (layerOpacityOn) {
-      o.lo = 1;
-    }
-    return JSON.stringify(o);
-  }
-
   private _gradientTextureReferencedInCache(tex: DataTexture): boolean {
     for (const v of this._effectsMaterialCache.values()) {
       if (v.gradientTex === tex) return true;
@@ -490,7 +397,7 @@ export class Group extends GroupRaw {
     const any = hasStyleEffects || layerOpacityOn;
 
     const rtW = this.renderTargetWidth > 0 ? this.renderTargetWidth : RT_FALLBACK;
-    const cacheKey = this._effectsMaterialCacheKey(e, rtW);
+    const cacheKey = effectsMaterialCacheKey(e, rtW);
     const cached = this._takeCachedEffectsMaterial(cacheKey);
     if (cached) {
       if (
