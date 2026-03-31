@@ -1,4 +1,5 @@
 import * as THREE from "three/webgpu";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { texture as tslTexture } from "three/tsl";
 import { createApp, watch } from "vue";
@@ -37,12 +38,12 @@ document.documentElement.style.backgroundColor = playgroundBgCss;
 document.body.style.backgroundColor = playgroundBgCss;
 
 const camera = new THREE.PerspectiveCamera(
-  50,
+  40,
   window.innerWidth / window.innerHeight,
   0.1,
   100,
 );
-camera.position.set(0.6, 0.6, 8.0);
+camera.position.set(0.6, 0.6, 10.0);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = false;
@@ -55,24 +56,58 @@ scene.add(key);
 scene.add(new THREE.AmbientLight(0xffffff, 0.28));
 
 const grid = new THREE.GridHelper(10, 20, 0x999999, 0x999999);
+grid.position.y = -1;
+grid.rotation.y = Math.PI * 0.25;
 scene.add(grid);
 
-const cube = new THREE.Mesh(
-  new THREE.BoxGeometry(1, 1, 1),
-  new THREE.MeshStandardNodeMaterial({
-    color: new THREE.Color(0xffffff),
-    metalness: 0,
-    roughness: 0.6,
-  }),
-);
+const duckRoot = new THREE.Group();
 
 const cubeGroup = new EffectsGroup();
 cubeGroup.debug = true;
 cubeGroup.debugColor.set(0x00aa44);
 cubeGroup.paddingExtra = 0;
 cubeGroup.position.y = 0.5;
-cubeGroup.add(cube);
+cubeGroup.add(duckRoot);
 scene.add(cubeGroup);
+
+const duckGlbUrl = `${import.meta.env.BASE_URL}duck.glb`;
+
+/** Reuse the diffuse map as emissive, mild glow (standard GLTF materials). */
+function applyEmissiveFromMap(root: THREE.Object3D) {
+  root.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh)) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const m of mats) {
+      if (!m || !("map" in m) || !m.map) continue;
+      const std = m as THREE.MeshStandardMaterial;
+      std.emissiveMap = std.map;
+      std.emissive.set(0xffffff);
+      std.emissiveIntensity = 0.5;
+    }
+  });
+}
+
+new GLTFLoader().load(
+  duckGlbUrl,
+  (gltf) => {
+    const model = gltf.scene;
+    applyEmissiveFromMap(model);
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z, 1e-6);
+    const targetMax = 3;
+    const s = targetMax / maxDim;
+    model.scale.setScalar(s);
+    box.setFromObject(model);
+    const center = box.getCenter(new THREE.Vector3());
+    model.position.sub(center);
+    duckRoot.add(model);
+  },
+  undefined,
+  (err) => {
+    console.error("Failed to load duck.glb", err);
+  },
+);
 
 const sphereMat = new THREE.MeshStandardNodeMaterial({
   color: new THREE.Color(0xffffff),
@@ -133,7 +168,7 @@ function makeLabel(text: string, bgHex: number): THREE.Mesh {
   return mesh;
 }
 
-cubeGroup.debugGroup.add(makeLabel("cube", 0x00aa44));
+cubeGroup.debugGroup.add(makeLabel("duck", 0x00aa44));
 groupA.debugGroup.add(makeLabel("sphere A", 0xff6600));
 groupB.debugGroup.add(makeLabel("sphere B", 0xff0066));
 
@@ -296,10 +331,9 @@ window.addEventListener("resize", onResize);
 renderer.setAnimationLoop((time) => {
   const t = time * 0.001;
 
-  cube.rotation.x = t * 0.45;
-  cube.rotation.y = t * 0.65;
+  duckRoot.rotation.y = t * 0.65;
 
-  const orbitR = 1.5;
+  const orbitR = 2;
   const orbitY = 0.8;
   groupA.position.set(
     Math.cos(t * 0.9) * orbitR,

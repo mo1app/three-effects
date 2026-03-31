@@ -2,6 +2,7 @@
 import { computed, onUnmounted, ref, watch } from "vue";
 import LayerStyleDialog from "./LayerStyleDialog.vue";
 import {
+  buildAllGroupsSceneSnapshot,
   editorModel,
   effectsGroupEyeIsDim,
   initializedEffectsForLayer,
@@ -116,6 +117,25 @@ function onEffectsGroupEye(layerId: string) {
   toggleEffectsGroupEye(layerId);
 }
 
+const groupsSnapshotCopied = ref(false);
+let groupsSnapshotCopyTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function onCopyAllGroupsSnapshot() {
+  const snap = buildAllGroupsSceneSnapshot();
+  const text = JSON.stringify(snap, null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+    if (groupsSnapshotCopyTimer) clearTimeout(groupsSnapshotCopyTimer);
+    groupsSnapshotCopied.value = true;
+    groupsSnapshotCopyTimer = setTimeout(() => {
+      groupsSnapshotCopied.value = false;
+      groupsSnapshotCopyTimer = null;
+    }, 1500);
+  } catch {
+    triggerShake();
+  }
+}
+
 const selectedLayer = computed(
   () => props.layers[editorModel.value.ui.layersSelectedIndex] ?? null,
 );
@@ -182,7 +202,10 @@ watch(selectedLayer, () => {
   unbindOpacityOutsideClose();
 });
 
-onUnmounted(() => unbindOpacityOutsideClose());
+onUnmounted(() => {
+  unbindOpacityOutsideClose();
+  if (groupsSnapshotCopyTimer) clearTimeout(groupsSnapshotCopyTimer);
+});
 </script>
 
 <template>
@@ -364,7 +387,12 @@ onUnmounted(() => unbindOpacityOutsideClose());
       </button>
       <button type="button" class="ft-btn" title="Add layer mask" @click="noop">▢</button>
       <button type="button" class="ft-btn yin" title="New fill/adjustment" @click="noop">◐</button>
-      <button type="button" class="ft-btn" title="New group" @click="noop">📁</button>
+      <button
+        type="button"
+        class="ft-btn"
+        title="Copy all groups: layer visibility, opacity, and every layer's effects (JSON)"
+        @click="onCopyAllGroupsSnapshot"
+      >{{ groupsSnapshotCopied ? "✓" : "📁" }}</button>
       <button type="button" class="ft-btn" title="New layer" @click="noop">▤</button>
       <button type="button" class="ft-btn" title="Delete" @click="noop">🗑</button>
     </footer>

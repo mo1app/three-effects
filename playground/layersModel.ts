@@ -204,8 +204,8 @@ const defaultLayerOpacity = (): LayerOpacityState => ({
 
 function defaultPlaygroundUi(): PlaygroundUiState {
   return {
-    layersPanel: { x: 16, y: 80 },
-    layerStyleDialog: { x: 280, y: 80 },
+    layersPanel: { x: 16, y: 104 },
+    layerStyleDialog: { x: 280, y: 104 },
     gradientEditor: { x: 120, y: 120 },
     layerStyleOpenLayerId: null,
     gradientEditorOpen: false,
@@ -262,34 +262,125 @@ function mergePlaygroundEditorState(stored: Partial<EditorModel>, defaults: Edit
   return merged;
 }
 
+/** Initial scene: layer visibility/opacity + effects (clipboard snapshot, Mar 2026). */
+const PLAYGROUND_DEFAULT_EFFECTS = {
+  group: {
+    stroke: {
+      initialized: true,
+      enabled: true,
+      sizePx: 25,
+      position: "outside" as const,
+      opacity: 1,
+      color: "#b34700",
+    },
+    colorOverlay: {
+      initialized: true,
+      enabled: false,
+      opacity: 0.13,
+      color: "#ffdd00",
+    },
+    blur: {
+      initialized: true,
+      enabled: false,
+      sizePx: 10,
+    },
+    dropShadow: {
+      initialized: true,
+      enabled: true,
+      opacity: 0.75,
+      angle: 120,
+      distancePx: 50,
+      spread: 0,
+      sizePx: 35,
+      color: "#000000",
+    },
+  },
+  groupB: {
+    blur: {
+      initialized: true,
+      enabled: true,
+      sizePx: 14,
+    },
+    stroke: {
+      initialized: true,
+      enabled: true,
+      sizePx: 27,
+      position: "outside" as const,
+      opacity: 1,
+      color: "#8f70ff",
+    },
+    innerShadow: {
+      initialized: true,
+      enabled: false,
+      color: "#000000",
+      opacity: 1,
+      angle: 125,
+      distancePx: 31,
+      choke: 0,
+      sizePx: 24,
+    },
+    colorOverlay: {
+      initialized: true,
+      enabled: true,
+      opacity: 0.35,
+      color: "#ffffff",
+    },
+  },
+  groupA: {
+    gradientOverlay: {
+      initialized: true,
+      enabled: true,
+      opacity: 0.9,
+      style: "linear" as const,
+      angle: 90,
+      scale: 1,
+      reverse: false,
+      stops: [
+        { color: "#808080", position: 0.0017192178143712576 },
+        { color: "#ffffff", position: 1 },
+      ],
+    },
+    dropShadow: {
+      initialized: true,
+      enabled: true,
+      opacity: 1,
+      angle: 95,
+      distancePx: 12,
+      spread: 0,
+      sizePx: 23,
+      color: "#000000",
+    },
+  },
+} satisfies EditorModel["effects"];
+
 function createDefaultEditorModel(): EditorModel {
   return {
-    groupHelpersVisible: true,
+    groupHelpersVisible: false,
     ui: defaultPlaygroundUi(),
     layers: [
       {
         id: "group",
-        name: "cube",
+        name: "duck",
         color: "#00aa44",
         visible: true,
-        opacity: defaultLayerOpacity(),
+        opacity: { enabled: true, value: 1 },
       },
       {
         id: "groupA",
         name: "sphere A",
         color: "#ff6600",
         visible: true,
-        opacity: defaultLayerOpacity(),
+        opacity: { enabled: true, value: 0.93 },
       },
       {
         id: "groupB",
         name: "sphere B",
         color: "#ff0066",
         visible: true,
-        opacity: defaultLayerOpacity(),
+        opacity: { enabled: true, value: 1 },
       },
     ],
-    effects: {},
+    effects: JSON.parse(JSON.stringify(PLAYGROUND_DEFAULT_EFFECTS)) as EditorModel["effects"],
   };
 }
 
@@ -305,6 +396,26 @@ export const editorModel = useStorage<EditorModel>(
       mergePlaygroundEditorState(stored as Partial<EditorModel>, defaults),
   },
 );
+
+/**
+ * All scene groups: per-layer visibility + opacity (what {@link syncEditorToGroupEffects} reads from
+ * layer rows) and the full `effects` map. No UI state (panel positions, names, colors, selection).
+ */
+export type PlaygroundGroupsSceneSnapshot = {
+  layers: Array<Pick<LayerItem, "id" | "visible" | "opacity">>;
+  effects: EditorModel["effects"];
+};
+
+export function buildAllGroupsSceneSnapshot(): PlaygroundGroupsSceneSnapshot {
+  return {
+    layers: editorModel.value.layers.map((l) => ({
+      id: l.id,
+      visible: l.visible,
+      opacity: JSON.parse(JSON.stringify(l.opacity)) as LayerOpacityState,
+    })),
+    effects: JSON.parse(JSON.stringify(editorModel.value.effects)) as EditorModel["effects"],
+  };
+}
 
 export function getLayerEffectState(
   layerId: string,

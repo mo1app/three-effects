@@ -578,6 +578,10 @@ export class GroupRaw extends ThreeGroup {
     scene: Scene,
     camera: PerspectiveCamera,
   ): void {
+    // Content added under nested Groups (e.g. async GLTF into a pivot) never
+    // hits {@link GroupRaw.add}; re-apply capture layers every frame.
+    this._syncEffectsContentLayers();
+
     // Lazy resize observer: invalidates the cached target dimensions whenever
     // the canvas changes size, ensuring a 1-frame-max stale period.
     if (!this._resizeObserver) {
@@ -727,6 +731,18 @@ export class GroupRaw extends ThreeGroup {
   }
 
   // ── overrides ─────────────────────────────────────────────────────────────
+
+  /** Force all content (except the billboard plane) onto SHARED_LAYER only. */
+  private _syncEffectsContentLayers(): void {
+    if (!this._effectsEnabled) return;
+    for (const child of this.children) {
+      if (child === this._plane) continue;
+      child.traverse((node) => {
+        node.layers.disable(0);
+        node.layers.enable(SHARED_LAYER);
+      });
+    }
+  }
 
   /** Toggle a layer on all content children (not the plane). */
   private _setContentLayer(layer: number, enabled: boolean): void {
