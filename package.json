@@ -26,6 +26,8 @@
     "dev": "vite --config playground/vite.config.ts",
     "dev:lib": "vite build --watch",
     "build": "vite build && tsc -p tsconfig.build.json",
+    "build:playground": "vite build --config playground/vite.config.ts",
+    "preview:playground": "vite preview --config playground/vite.config.ts",
     "test": "vitest run",
     "prepublishOnly": "npm run build"
   },

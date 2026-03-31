@@ -47,6 +47,8 @@ function animate() {
 npm install three-effects
 ```
 
+The interactive demo in this repo is under [`playground/`](./playground/README.md) (see **`playground/README.md`**).
+
 ## `Group`
 
 **`Group`** extends **`THREE.Group`**. Add meshes (or other objects) as children; the library fits a **billboard quad** to their **screen-space bounding box**, draws them into a **cropped render target** each frame, and runs a built-in **layer-style** shader on that texture. You configure everything through **`g.effects`**: toggle blocks with **`enabled`**, set colors, blur sizes in pixels, and so on. **`effectsEnabled`** defaults to **`true`**.

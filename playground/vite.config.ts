@@ -5,8 +5,12 @@ import { fileURLToPath } from "node:url";
 
 const playgroundDir = dirname(fileURLToPath(import.meta.url));
 
+/** GitHub project Pages: `/repo-name/`. Custom domain (apex): `/`. Set in CI via `VITE_BASE`. */
+const base = process.env.VITE_BASE ?? "/";
+
 export default defineConfig({
   root: playgroundDir,
+  base,
   plugins: [vue()],
   resolve: {
     alias: {
