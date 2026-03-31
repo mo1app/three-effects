@@ -18,7 +18,7 @@ import {
   Texture,
   Node,
 } from "three/webgpu";
-import { texture as textureNode, uv, vec2 } from "three/tsl";
+import { texture as textureNode, uv, vec2, uniform } from "three/tsl";
 
 // ─── renderer duck-type ───────────────────────────────────────────────────────
 
@@ -153,6 +153,12 @@ export class Group extends ThreeGroup {
     transparent: true,
   });
 
+  // UV remapping uniforms — updated each frame to handle cases where the
+  // content NDC bbox is clamped to the renderer bounds (render target < full bbox).
+  // Default (1,-1) / (0,1) is the identity Y-flip for WebGPU render targets.
+  private readonly _uvScale  = uniform(new Vector2(1, -1));
+  private readonly _uvOffset = uniform(new Vector2(0,  1));
+
   private _target: RenderTarget | null = null;
   private _targetW = 0;
   private _targetH = 0;
@@ -253,8 +259,8 @@ export class Group extends ThreeGroup {
    * @returns A texture node sampling at the offset UV.
    */
   createOffsetSample(uvOffsetNode: Node): ReturnType<typeof textureNode> {
-    const uvFlipped = uv().mul(vec2(1, -1)).add(vec2(0, 1));
-    const node = textureNode(this._placeholderTex, uvFlipped.add(uvOffsetNode));
+    const uvRemapped = uv().mul(this._uvScale).add(this._uvOffset);
+    const node = textureNode(this._placeholderTex, uvRemapped.add(uvOffsetNode));
     this._secondaryNodes.push(node);
     return node;
   }
@@ -268,10 +274,10 @@ export class Group extends ThreeGroup {
     // renderer.render() calls updateMatrixWorld() on cameras with no parent.
     this._internalCamera.matrixWorldAutoUpdate = false;
 
-    // Y-flipped UV: WebGPU render targets have V=0 at the top of the image,
-    // but the plane's V=0 is at the bottom, so we sample (u, 1−v).
-    const uvFlipped = uv().mul(vec2(1, -1)).add(vec2(0, 1));
-    this._mapNode = textureNode(this._placeholderTex, uvFlipped);
+    // UV remapping: _uvScale / _uvOffset are updated each frame in _renderToTarget
+    // to account for both the WebGPU Y-flip and any render-target clamping.
+    const uvRemapped = uv().mul(this._uvScale).add(this._uvOffset);
+    this._mapNode = textureNode(this._placeholderTex, uvRemapped);
     this._texMat.colorNode = this._mapNode;
 
     this._plane = new Mesh(_geo, this._solidMat);
@@ -500,13 +506,35 @@ export class Group extends ThreeGroup {
     const fullW = Math.round(_rendererSize.x * dpr);
     const fullH = Math.round(_rendererSize.y * dpr);
 
-    // Pixel bounding box of the content (screen Y is top-down)
-    const pxMinX = Math.floor((nMinX + 1) * 0.5 * fullW);
-    const pxMaxX = Math.ceil((nMaxX + 1) * 0.5 * fullW);
-    const pxMinY = Math.floor((1 - nMaxY) * 0.5 * fullH);
-    const pxMaxY = Math.ceil((1 - nMinY) * 0.5 * fullH);
+    // Pixel bounding box of the content (screen Y is top-down), clamped to the
+    // renderer bounds so the render target never exceeds fullW × fullH.
+    const pxMinX = Math.max(0, Math.floor((nMinX + 1) * 0.5 * fullW));
+    const pxMaxX = Math.min(fullW, Math.ceil((nMaxX + 1) * 0.5 * fullW));
+    const pxMinY = Math.max(0, Math.floor((1 - nMaxY) * 0.5 * fullH));
+    const pxMaxY = Math.min(fullH, Math.ceil((1 - nMinY) * 0.5 * fullH));
     const cropW = Math.max(1, pxMaxX - pxMinX);
     const cropH = Math.max(1, pxMaxY - pxMinY);
+
+    // Derive the visible NDC sub-region from the clamped pixel bounds and update
+    // the UV uniforms so the billboard samples the correct portion of the texture.
+    // When no clamping occurs, scaleU=1 / scaleV=1 / offsetU=0 / offsetV=1
+    // (the identity Y-flip for WebGPU render targets).
+    const visNdcMinX = (pxMinX / fullW) * 2 - 1;
+    const visNdcMaxX = (pxMaxX / fullW) * 2 - 1;
+    const visNdcMinY = 1 - (pxMaxY / fullH) * 2;
+    const visNdcMaxY = 1 - (pxMinY / fullH) * 2;
+    const visNdcW = visNdcMaxX - visNdcMinX;
+    const visNdcH = visNdcMaxY - visNdcMinY;
+    const fullNdcW = nMaxX - nMinX;
+    const fullNdcH = nMaxY - nMinY;
+    this._uvScale.value.set(
+      fullNdcW / visNdcW,           // scaleU: stretches U across the full bbox
+      -(fullNdcH / visNdcH),        // scaleV: negated for Y-flip
+    );
+    this._uvOffset.value.set(
+      (nMinX - visNdcMinX) / visNdcW,           // offsetU
+      (visNdcMaxY - nMinY) / visNdcH,           // offsetV (Y-flipped)
+    );
 
     // Allocate a cropped render target sized to the bbox — not full-screen
     if (cropW !== this._targetW || cropH !== this._targetH) {

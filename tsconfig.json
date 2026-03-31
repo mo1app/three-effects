@@ -10,7 +10,7 @@
     "allowJs": true,
     "checkJs": false,
     "noEmit": true,
-    "rootDir": "src",
+    "rootDir": ".",
     "outDir": "dist",
     "declaration": true,
     "declarationMap": true,

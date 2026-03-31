@@ -16,7 +16,11 @@ import {
   texture as tslTexture,
 } from "three/tsl";
 import { gaussianBlur } from "three/addons/tsl/display/GaussianBlurNode.js";
+import { createApp } from "vue";
 import { Group } from "three-group-effects";
+import App from "./App.vue";
+import { editorModel } from "./layersModel";
+import "./shake.css";
 
 const root = document.querySelector("#app")!;
 
@@ -124,6 +128,25 @@ function makeLabel(text: string, bgHex: number): THREE.Mesh {
 group.debugGroup.add(makeLabel("cube", 0x00aa44));
 groupA.debugGroup.add(makeLabel("sphere A", 0xff6600));
 groupB.debugGroup.add(makeLabel("sphere B", 0xff0066));
+
+const layerObjects: Record<string, THREE.Object3D> = {
+  group,
+  groupA,
+  groupB,
+};
+
+function toggleLayerVisibility(id: string) {
+  const entry = editorModel.layers.find((l) => l.id === id);
+  if (!entry) return;
+  entry.visible = !entry.visible;
+  const obj = layerObjects[id];
+  if (obj) obj.visible = entry.visible;
+}
+
+const uiRoot = document.querySelector("#ui");
+if (uiRoot) {
+  createApp(App, { toggleLayerVisibility }).mount(uiRoot);
+}
 
 // ── Duotone circle-halftone material (sphere groups) ──────────────────────────
 const duotoneDark = uniform(new THREE.Color().setRGB(0 / 255, 36 / 255, 255 / 255));

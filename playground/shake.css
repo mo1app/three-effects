@@ -1,0 +1,31 @@
+@keyframes shake-panel {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  12.5% {
+    transform: translateX(-5px);
+  }
+  25% {
+    transform: translateX(5px);
+  }
+  37.5% {
+    transform: translateX(-4px);
+  }
+  50% {
+    transform: translateX(4px);
+  }
+  62.5% {
+    transform: translateX(-3px);
+  }
+  75% {
+    transform: translateX(3px);
+  }
+  87.5% {
+    transform: translateX(-2px);
+  }
+}
+
+.shake-anim {
+  animation: shake-panel 0.45s ease;
+}
