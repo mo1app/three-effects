@@ -22,6 +22,18 @@ const IG_SIGMA = 8;
 const OG_SIGMA = 8;
 const RT_FALLBACK = 200;
 
+const EFFECTS_MAT_CACHE_MAX = 8;
+
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000;
+}
+
+/** LRU value: material + gradient texture owned by that graph (if any). */
+type CachedEffectsMaterial = {
+  mat: MeshBasicNodeMaterial;
+  gradientTex: DataTexture | null;
+};
+
 // ─── public effect block types ───────────────────────────────────────────────
 
 export type GroupEffectsStroke = {
@@ -257,7 +269,20 @@ export class Group extends GroupRaw {
   readonly effects: GroupEffects;
 
   private readonly _strokeSizeUniform = uniform(10);
+  /** Drives `layerStyles().opacity()` when `effects.opacity.enabled` — updated without graph rebuild for smooth animation. */
+  private readonly _layerOpacityUniform = uniform(1);
   private _gradientTexture: DataTexture | null = null;
+
+  /**
+   * LRU cache of compiled `effectsMaterial` variants (max {@link EFFECTS_MAT_CACHE_MAX}).
+   *
+   * **Invariants (read before changing dispose / gradient / cache logic):**
+   * - Cache keys must **not** include values driven by live uniforms (`stroke.sizePx`, `effects.opacity.value`); update those uniforms instead.
+   * - Each entry may own a `gradientTex` ref also held in {@link _gradientTexture}; never `dispose()` a `DataTexture` still referenced by any cache entry.
+   * - Before replacing `_gradientTexture`, use {@link _gradientTextureReferencedInCache}; evicted entries {@link _cacheEffectsMaterial} dispose their own `gradientTex`.
+   * - Eviction skips the material currently assigned to `effectsMaterial` so we never dispose the active program.
+   */
+  private readonly _effectsMaterialCache = new Map<string, CachedEffectsMaterial>();
 
   constructor() {
     super();
@@ -290,9 +315,165 @@ export class Group extends GroupRaw {
       this._strokeSizeUniform.value = this._effectsTarget.stroke.sizePx;
       return;
     }
+    if (
+      path.length === 2 &&
+      path[0] === "opacity" &&
+      path[1] === "value" &&
+      this._effectsTarget.opacity.enabled &&
+      this.effectsMaterial
+    ) {
+      const v = this._effectsTarget.opacity.value;
+      this._layerOpacityUniform.value = Math.min(1, Math.max(0, v));
+      return;
+    }
     this._syncEffectsMaterial();
   }
 
+  /** Serialize enabled effect parameters for cache lookup (`stroke.sizePx` and `effects.opacity.value` excluded — live uniforms). */
+  private _effectsMaterialCacheKey(e: GroupEffects, rtW: number): string {
+    const w = rtW > 0 ? rtW : RT_FALLBACK;
+    const r = round4;
+
+    const hasStyleEffects =
+      e.stroke.enabled ||
+      e.dropShadow.enabled ||
+      e.outerGlow.enabled ||
+      e.colorOverlay.enabled ||
+      e.gradientOverlay.enabled ||
+      e.innerShadow.enabled ||
+      e.innerGlow.enabled;
+    const layerOpacityOn = e.opacity.enabled;
+
+    if (!hasStyleEffects && !layerOpacityOn) {
+      return JSON.stringify({ p: 1 });
+    }
+    if (!hasStyleEffects && layerOpacityOn) {
+      return JSON.stringify({ lo: 1 });
+    }
+
+    const o: Record<string, unknown> = { rtW: w };
+    if (e.dropShadow.enabled) {
+      o.ds = {
+        c: e.dropShadow.color.getHexString(),
+        o: r(e.dropShadow.opacity),
+        a: r(e.dropShadow.angle),
+        d: r(e.dropShadow.distancePx),
+        sp: r(e.dropShadow.spread),
+        sz: r(e.dropShadow.sizePx),
+      };
+    }
+    if (e.outerGlow.enabled) {
+      o.og = {
+        c: e.outerGlow.color.getHexString(),
+        o: r(e.outerGlow.opacity),
+        sp: r(e.outerGlow.spread),
+        sz: r(e.outerGlow.sizePx),
+      };
+    }
+    if (e.colorOverlay.enabled) {
+      o.co = {
+        c: e.colorOverlay.color.getHexString(),
+        o: r(e.colorOverlay.opacity),
+      };
+    }
+    if (e.gradientOverlay.enabled && e.gradientOverlay.stops.length > 0) {
+      o.go = {
+        style: e.gradientOverlay.style,
+        o: r(e.gradientOverlay.opacity),
+        angle: r(e.gradientOverlay.angle),
+        scale: r(e.gradientOverlay.scale),
+        reverse: e.gradientOverlay.reverse,
+        stops: e.gradientOverlay.stops.map((s) => ({
+          c: s.color,
+          p: r(s.position),
+        })),
+      };
+    }
+    if (e.innerShadow.enabled) {
+      o.ins = {
+        c: e.innerShadow.color.getHexString(),
+        o: r(e.innerShadow.opacity),
+        a: r(e.innerShadow.angle),
+        d: r(e.innerShadow.distancePx),
+        ch: r(e.innerShadow.choke),
+        sz: r(e.innerShadow.sizePx),
+      };
+    }
+    if (e.innerGlow.enabled) {
+      o.ig = {
+        c: e.innerGlow.color.getHexString(),
+        o: r(e.innerGlow.opacity),
+        source: e.innerGlow.source,
+        ch: r(e.innerGlow.choke),
+        sz: r(e.innerGlow.sizePx),
+      };
+    }
+    if (e.stroke.enabled) {
+      o.st = {
+        p: e.stroke.position,
+        o: r(e.stroke.opacity),
+        c: e.stroke.color.getHexString(),
+      };
+    }
+    if (layerOpacityOn) {
+      o.lo = 1;
+    }
+    return JSON.stringify(o);
+  }
+
+  private _gradientTextureReferencedInCache(tex: DataTexture): boolean {
+    for (const v of this._effectsMaterialCache.values()) {
+      if (v.gradientTex === tex) return true;
+    }
+    return false;
+  }
+
+  private _takeCachedEffectsMaterial(
+    key: string,
+  ): CachedEffectsMaterial | undefined {
+    const v = this._effectsMaterialCache.get(key);
+    if (!v) return undefined;
+    this._effectsMaterialCache.delete(key);
+    this._effectsMaterialCache.set(key, v);
+    return v;
+  }
+
+  private _cacheEffectsMaterial(key: string, entry: CachedEffectsMaterial): void {
+    if (this._effectsMaterialCache.has(key)) {
+      this._effectsMaterialCache.delete(key);
+    }
+    this._effectsMaterialCache.set(key, entry);
+    while (this._effectsMaterialCache.size > EFFECTS_MAT_CACHE_MAX) {
+      let evictKey: string | undefined;
+      for (const [k, v] of this._effectsMaterialCache) {
+        if (v.mat !== this.effectsMaterial) {
+          evictKey = k;
+          break;
+        }
+      }
+      if (!evictKey) break;
+      const ev = this._effectsMaterialCache.get(evictKey)!;
+      this._effectsMaterialCache.delete(evictKey);
+      ev.mat.dispose();
+      ev.gradientTex?.dispose();
+    }
+  }
+
+  private _releaseMaterialIfStale(m: MeshBasicNodeMaterial | null): void {
+    if (!m) return;
+    for (const v of this._effectsMaterialCache.values()) {
+      if (v.mat === m) return;
+    }
+    m.dispose();
+  }
+
+  /**
+   * Rebuilds or reuses `effectsMaterial` from the LRU cache when the **effect signature** changes.
+   *
+   * **Layer opacity (`effects.opacity`):** `value` is **not** part of the cache key. It drives
+   * `_layerOpacityUniform` so you can animate opacity every frame (or scrub a slider)
+   * without recompiling the node graph — same pattern as `_strokeSizeUniform`.
+   */
   private _syncEffectsMaterial(): void {
     const prev = this.effectsMaterial;
     const e = this._effectsTarget;
@@ -305,11 +486,39 @@ export class Group extends GroupRaw {
       e.gradientOverlay.enabled ||
       e.innerShadow.enabled ||
       e.innerGlow.enabled;
-    const opacityActive = e.opacity.enabled && e.opacity.value < 1;
-    const any = hasStyleEffects || opacityActive;
+    const layerOpacityOn = e.opacity.enabled;
+    const any = hasStyleEffects || layerOpacityOn;
+
+    const rtW = this.renderTargetWidth > 0 ? this.renderTargetWidth : RT_FALLBACK;
+    const cacheKey = this._effectsMaterialCacheKey(e, rtW);
+    const cached = this._takeCachedEffectsMaterial(cacheKey);
+    if (cached) {
+      if (
+        this._gradientTexture &&
+        this._gradientTexture !== cached.gradientTex &&
+        !this._gradientTextureReferencedInCache(this._gradientTexture)
+      ) {
+        this._gradientTexture.dispose();
+      }
+      this._gradientTexture = cached.gradientTex;
+      if (e.stroke.enabled) {
+        this._strokeSizeUniform.value = e.stroke.sizePx;
+      }
+      if (layerOpacityOn) {
+        this._layerOpacityUniform.value = Math.min(1, Math.max(0, e.opacity.value));
+      }
+      this.effectsMaterial = cached.mat;
+      if (prev && prev !== cached.mat) {
+        this._releaseMaterialIfStale(prev);
+      }
+      return;
+    }
 
     if (!any) {
-      this._gradientTexture?.dispose();
+      const prevTex = this._gradientTexture;
+      if (prevTex && !this._gradientTextureReferencedInCache(prevTex)) {
+        prevTex.dispose();
+      }
       this._gradientTexture = null;
       const mat = new MeshBasicNodeMaterial({
         transparent: true,
@@ -317,8 +526,11 @@ export class Group extends GroupRaw {
         side: 2,
       });
       mat.colorNode = this.mapNode as MeshBasicNodeMaterial["colorNode"];
+      this._cacheEffectsMaterial(cacheKey, { mat, gradientTex: null });
       this.effectsMaterial = mat;
-      prev?.dispose();
+      if (prev && prev !== mat) {
+        this._releaseMaterialIfStale(prev);
+      }
       return;
     }
 
@@ -327,8 +539,6 @@ export class Group extends GroupRaw {
       depthWrite: true,
       side: 2,
     });
-
-    const rtW = this.renderTargetWidth > 0 ? this.renderTargetWidth : RT_FALLBACK;
 
     let b = layerStyles(this);
 
@@ -359,7 +569,10 @@ export class Group extends GroupRaw {
       });
     }
     if (e.gradientOverlay.enabled && e.gradientOverlay.stops.length > 0) {
-      this._gradientTexture?.dispose();
+      const prevTex = this._gradientTexture;
+      if (prevTex && !this._gradientTextureReferencedInCache(prevTex)) {
+        prevTex.dispose();
+      }
       this._gradientTexture = createGradientTexture(
         colorStopsFromSerialized(e.gradientOverlay.stops),
       );
@@ -372,7 +585,10 @@ export class Group extends GroupRaw {
         reverse: e.gradientOverlay.reverse,
       });
     } else {
-      this._gradientTexture?.dispose();
+      const prevTex = this._gradientTexture;
+      if (prevTex && !this._gradientTextureReferencedInCache(prevTex)) {
+        prevTex.dispose();
+      }
       this._gradientTexture = null;
     }
     if (e.innerShadow.enabled) {
@@ -405,13 +621,20 @@ export class Group extends GroupRaw {
         size: this._strokeSizeUniform,
       });
     }
-    if (e.opacity.enabled && e.opacity.value < 1) {
-      b = b.opacity({ value: e.opacity.value });
+    if (layerOpacityOn) {
+      this._layerOpacityUniform.value = Math.min(1, Math.max(0, e.opacity.value));
+      b = b.opacity({ value: this._layerOpacityUniform });
     }
 
     mat.colorNode = b.node as MeshBasicNodeMaterial["colorNode"];
+    this._cacheEffectsMaterial(cacheKey, {
+      mat,
+      gradientTex: this._gradientTexture,
+    });
     this.effectsMaterial = mat;
-    prev?.dispose();
+    if (prev && prev !== mat) {
+      this._releaseMaterialIfStale(prev);
+    }
   }
 
   protected override _syncAutoPadding(
@@ -456,7 +679,11 @@ export class Group extends GroupRaw {
   }
 
   override dispose(): void {
-    this._gradientTexture?.dispose();
+    for (const [, v] of this._effectsMaterialCache) {
+      v.mat.dispose();
+      v.gradientTex?.dispose();
+    }
+    this._effectsMaterialCache.clear();
     this._gradientTexture = null;
     super.dispose();
   }

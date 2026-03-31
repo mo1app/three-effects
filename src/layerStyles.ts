@@ -175,8 +175,11 @@ export interface InnerGlowOptions {
  * Layer-wide opacity: multiplies final RGB and alpha after all other styles (Photoshop layer opacity).
  */
 export interface OpacityOptions {
-  /** `0…1`. @default `1` */
-  value: number;
+  /**
+   * `0…1` CPU scalar, or a pre-made `uniform(…)` node (e.g. `Group`'s layer-opacity uniform)
+   * so opacity can animate every frame without rebuilding the shader graph.
+   */
+  value: number | ReturnType<typeof uniform<number>>;
 }
 
 export interface StrokeOptions {
@@ -328,58 +331,63 @@ export class LayerStylesBuilder {
     const st = this._stroke;
     const op = this._opacity;
 
-    // ── Drop shadow ───────────────────────────────────────────────────────
-    const dsColor = uniform(new Color(ds?.color ?? 0x000000));
-    const dsOpacity = uniform(ds?.opacity ?? 0.75);
-    const dsAngle = uniform(ds?.angle ?? 120);
-    const dsDistance = uniform(ds?.distance ?? 0.02);
-    const dsSpread = uniform(ds?.spread ?? 0);
-    const dsBlurR = uniform(ds?.blurRadius ?? 2);
-    const dsSigma = ds?.sigma ?? 12;
-
-    const dsRad = dsAngle.mul(PI).div(180);
-    const dsOff = vec2(cos(dsRad), sin(dsRad)).mul(dsDistance).negate();
-    const shadowSrc = ds ? this._group.createOffsetSample(dsOff) : srcTex;
-    const shadowBlur = ds
-      ? blurPremult(shadowSrc as ReturnType<typeof texture>, dsBlurR, dsSigma)
-      : srcTex;
-    const shadowRawA = shadowBlur.a;
-    const shadowSpreadA = smoothstep(
-      float(0),
-      max(float(0.001), float(1).sub(dsSpread)),
-      shadowRawA,
-    );
-    const shadowMask = ds ? shadowSpreadA.mul(dsOpacity).clamp(0, 1) : float(0);
-
-    // ── Outer glow ────────────────────────────────────────────────────────
-    const ogColorU = uniform(new Color(og?.color ?? 0xffff00));
-    const ogOpacity = uniform(og?.opacity ?? 0.8);
-    const ogSpread = uniform(og?.spread ?? 0);
-    const ogBlurR = uniform(og?.blurRadius ?? 4);
-    const ogSigma = og?.sigma ?? 8;
-    const ogBlur = og ? blurPremult(srcTex, ogBlurR, ogSigma) : srcTex;
-    const ogRingRaw = max(float(0), ogBlur.a.sub(srcA));
-    const ogRing = og
-      ? smoothstep(float(0), max(float(0.001), float(1).sub(ogSpread)), ogRingRaw)
-      : float(0);
-    const ogMask = og ? ogRing.mul(ogOpacity).clamp(0, 1) : float(0);
-
-    const ogGradTex = og?.gradientTexture;
-    const ogSolid = vec3(ogColorU);
-    const ogSampleU = clamp(ogRing.mul(2), 0, 1);
-    const ogTexSample = ogGradTex
-      ? texture(ogGradTex, vec2(ogSampleU, 0.5))
-      : null;
-    const ogRgb = og
-      ? ogTexSample
-        ? vec3(ogTexSample.r, ogTexSample.g, ogTexSample.b)
-        : ogSolid
-      : vec3(0, 0, 0);
-
-    // Background under content: shadow then outer glow
+    // ── Drop shadow (only allocate when enabled) ──────────────────────────
+    let shadowMask = float(0);
     let bgRgb = vec3(0, 0, 0);
-    bgRgb = mix(bgRgb, vec3(dsColor), shadowMask);
-    bgRgb = og ? mix(bgRgb, ogRgb, ogMask) : bgRgb;
+    if (ds) {
+      const dsColor = uniform(new Color(ds.color ?? 0x000000));
+      const dsOpacity = uniform(ds.opacity ?? 0.75);
+      const dsAngle = uniform(ds.angle ?? 120);
+      const dsDistance = uniform(ds.distance ?? 0.02);
+      const dsSpread = uniform(ds.spread ?? 0);
+      const dsBlurR = uniform(ds.blurRadius ?? 2);
+      const dsSigma = ds.sigma ?? 12;
+      const dsRad = dsAngle.mul(PI).div(180);
+      const dsOff = vec2(cos(dsRad), sin(dsRad)).mul(dsDistance).negate();
+      const shadowSrc = this._group.createOffsetSample(dsOff);
+      const shadowBlur = blurPremult(
+        shadowSrc as ReturnType<typeof texture>,
+        dsBlurR,
+        dsSigma,
+      );
+      const shadowRawA = shadowBlur.a;
+      const shadowSpreadA = smoothstep(
+        float(0),
+        max(float(0.001), float(1).sub(dsSpread)),
+        shadowRawA,
+      );
+      shadowMask = shadowSpreadA.mul(dsOpacity).clamp(0, 1);
+      bgRgb = mix(bgRgb, vec3(dsColor), shadowMask);
+    }
+
+    // ── Outer glow (only allocate when enabled) ───────────────────────────
+    let ogMask = float(0);
+    if (og) {
+      const ogColorU = uniform(new Color(og.color ?? 0xffff00));
+      const ogOpacity = uniform(og.opacity ?? 0.8);
+      const ogSpread = uniform(og.spread ?? 0);
+      const ogBlurR = uniform(og.blurRadius ?? 4);
+      const ogSigma = og.sigma ?? 8;
+      const ogBlur = blurPremult(srcTex, ogBlurR, ogSigma);
+      const ogRingRaw = max(float(0), ogBlur.a.sub(srcA));
+      const ogRing = smoothstep(
+        float(0),
+        max(float(0.001), float(1).sub(ogSpread)),
+        ogRingRaw,
+      );
+      ogMask = ogRing.mul(ogOpacity).clamp(0, 1);
+
+      const ogGradTex = og.gradientTexture;
+      const ogSolid = vec3(ogColorU);
+      const ogSampleU = clamp(ogRing.mul(2), 0, 1);
+      const ogTexSample = ogGradTex
+        ? texture(ogGradTex, vec2(ogSampleU, 0.5))
+        : null;
+      const ogRgb = ogTexSample
+        ? vec3(ogTexSample.r, ogTexSample.g, ogTexSample.b)
+        : ogSolid;
+      bgRgb = mix(bgRgb, ogRgb, ogMask);
+    }
 
     // ── Content + overlays ────────────────────────────────────────────────
     let layerRgb = srcRgb;
@@ -508,7 +516,7 @@ export class LayerStylesBuilder {
 
     // ── Output alpha (union) ──────────────────────────────────────────────
     let outA = shadowMask;
-    outA = max(outA, og ? ogMask : float(0));
+    outA = max(outA, ogMask);
     outA = max(outA, srcA);
     outA = max(outA, innerShadowMask);
     outA = max(outA, innerGlowMask);
@@ -516,9 +524,11 @@ export class LayerStylesBuilder {
 
     // ── Layer opacity (after full stack) ──────────────────────────────────
     if (op) {
-      // `uniform()` takes a CPU-side scalar; TSL `clamp()` returns a node — do not pass that here.
-      const opScalar = Math.min(1, Math.max(0, op.value ?? 1));
-      const opU = uniform(opScalar);
+      const v = op.value;
+      const opU =
+        typeof v === "number"
+          ? uniform(Math.min(1, Math.max(0, v ?? 1)))
+          : v;
       return vec4(mul(rgb, opU), mul(outA, opU));
     }
 
