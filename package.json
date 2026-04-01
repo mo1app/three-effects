@@ -1,6 +1,6 @@
 {
   "name": "three-effects",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Photoshop-style layer effects (drop shadow, stroke, glows, overlays) for Three.js WebGPU + TSL.",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -19,7 +19,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "sideEffects": false,
   "scripts": {
@@ -29,7 +30,8 @@
     "build:playground": "vite build --config playground/vite.config.ts",
     "preview:playground": "vite preview --config playground/vite.config.ts",
     "test": "vitest run",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "publish:npm": "npm test && npm publish"
   },
   "keywords": [
     "three.js",
@@ -42,6 +44,17 @@
     "stroke"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mo1app/three-effects.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mo1app/three-effects/issues"
+  },
+  "homepage": "https://three-effects.mo1.app",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
   "peerDependencies": {
     "three": ">=0.160.0 <0.200.0"
   },
