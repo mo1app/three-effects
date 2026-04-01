@@ -1,5 +1,7 @@
 # three-effects
 
+![three-effects playground demo: Layer Styles and live stroke on a 3D duck](docs/three-effects-sq-edit.gif)
+
 Add Photoshop-style **layer effects** to [Three.js](https://threejs.org/) objects (stroke, shadows, glows, overlays and blur).
 
 **[GitHub repo](https://github.com/mo1app/three-effects) · [npm Package](https://www.npmjs.com/package/three-effects) · [Live demo](https://three-effects.mo1.app)**
