@@ -24,7 +24,10 @@ import "./shake.css";
 
 const root = document.querySelector("#app")!;
 
-const renderer = new THREE.WebGPURenderer({ antialias: true });
+// WebGPU: requestAdapter({ powerPreference }) — discrete GPU when available.
+const renderer = new THREE.WebGPURenderer({
+  powerPreference: "high-performance",
+});
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 root.appendChild(renderer.domElement);

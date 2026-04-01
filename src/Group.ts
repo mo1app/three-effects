@@ -15,7 +15,11 @@ import {
 } from "three/webgpu";
 import { float, mul, texture, uniform, uv, vec2, vec3, vec4 } from "three/tsl";
 import { gaussianBlur } from "three/addons/tsl/display/GaussianBlurNode.js";
-import { GroupRaw, type RendererLike } from "./GroupRaw.js";
+import {
+  GroupRaw,
+  type GroupEffectsQuality,
+  type RendererLike,
+} from "./GroupRaw.js";
 import { layerStyles, type LayerStylesBuilder } from "./layerStyles.js";
 import {
   colorStopsFromSerialized,
@@ -29,12 +33,19 @@ import {
 
 // ─── sigma defaults (match layerStyles / playground) ─────────────────────────
 
-const DS_SIGMA = 12;
-const IS_SIGMA = 8;
-const IG_SIGMA = 8;
-const OG_SIGMA = 8;
-/** Gaussian sigma for layer-wide blur (matches inner glow / outer glow quality). */
-const BLUR_SIGMA = 8;
+/**
+ * Kawase blur preset for drop shadow, outer glow, inner shadow, inner glow
+ * (`blurRadius = sizePx / blurDenom`).
+ */
+const LAYER_KAWASE_QUALITY = {
+  fast: { kawasePasses: 4, blurResolutionScale: 0.5, blurDenom: 14 },
+  high: { kawasePasses: 6, blurResolutionScale: 1, blurDenom: 26 },
+} as const;
+/** Layer-wide `effects.blur` Gaussian sigma (`kernelSize = 3 + 2*sigma`) by {@link GroupEffects.quality}. */
+const BLUR_LAYER_SIGMA = {
+  fast: 5,
+  high: 8,
+} as const;
 
 const EFFECTS_MAT_CACHE_MAX = 8;
 
@@ -129,6 +140,10 @@ export type GroupEffectsBlur = {
  * `enabled` flag and parameters aligned with {@link layerStyles}.
  */
 export type GroupEffects = {
+  /**
+   * When omitted or `undefined`, {@link GroupRaw.defaultQuality} is used (also exposed as {@link Group.defaultQuality}).
+   */
+  quality?: GroupEffectsQuality;
   stroke: GroupEffectsStroke;
   dropShadow: GroupEffectsDropShadow;
   outerGlow: GroupEffectsOuterGlow;
@@ -275,6 +290,16 @@ function createDeepProxy<T extends object>(
  */
 export class Group extends GroupRaw {
   /**
+   * Alias for {@link GroupRaw.defaultQuality}. Unset {@link Group.effects.quality} resolves against this.
+   */
+  static get defaultQuality(): GroupEffectsQuality {
+    return GroupRaw.defaultQuality;
+  }
+  static set defaultQuality(v: GroupEffectsQuality) {
+    GroupRaw.defaultQuality = v;
+  }
+
+  /**
    * When `true`, {@link padding} is set each frame from enabled outward effects
    * plus {@link paddingExtra}. When `false`, only `padding` / `paddingExtra`
    * you set are used.
@@ -297,7 +322,7 @@ export class Group extends GroupRaw {
   private readonly _layerOpacityUniform = uniform(1);
   private _gradientTexture: DataTexture | null = null;
 
-  /** Direction scale for {@link gaussianBlur}; `sizePx / (2 + 2 * BLUR_SIGMA)`. */
+  /** Direction scale for {@link gaussianBlur}; `sizePx / (2 + 2 * sigma)` with sigma from {@link GroupEffects.quality}. */
   private readonly _blurRadiusUniform = uniform(2);
   private readonly _blurPlaceholderTex = new Texture();
   private readonly _blurTexNode: ReturnType<typeof texture>;
@@ -319,7 +344,10 @@ export class Group extends GroupRaw {
    * - Before replacing `_gradientTexture`, use {@link _gradientTextureReferencedInCache}; evicted entries {@link _cacheEffectsMaterial} dispose their own `gradientTex`.
    * - Eviction skips the material currently assigned to `effectsMaterial` so we never dispose the active program.
    */
-  private readonly _effectsMaterialCache = new Map<string, CachedEffectsMaterial>();
+  private readonly _effectsMaterialCache = new Map<
+    string,
+    CachedEffectsMaterial
+  >();
 
   /** Set when `effects` change in a way that requires rebuilding `effectsMaterial`. Cleared when `GroupRaw.preRenderEffects` runs or when {@link commitEffects} is called. */
   private _effectsDirty = false;
@@ -402,6 +430,10 @@ export class Group extends GroupRaw {
     }
   }
 
+  private _resolvedQuality(): GroupEffectsQuality {
+    return this._effectsTarget.quality ?? GroupRaw.defaultQuality;
+  }
+
   private _onEffectsPath(path: string[]): void {
     if (
       path.length === 2 &&
@@ -431,8 +463,9 @@ export class Group extends GroupRaw {
       this._effectsTarget.blur.enabled &&
       this.effectsMaterial
     ) {
+      const bs = BLUR_LAYER_SIGMA[this._resolvedQuality()];
       this._blurRadiusUniform.value =
-        this._effectsTarget.blur.sizePx / (2 + 2 * BLUR_SIGMA);
+        this._effectsTarget.blur.sizePx / (2 + 2 * bs);
       return;
     }
     this._effectsDirty = true;
@@ -455,7 +488,10 @@ export class Group extends GroupRaw {
     return v;
   }
 
-  private _cacheEffectsMaterial(key: string, entry: CachedEffectsMaterial): void {
+  private _cacheEffectsMaterial(
+    key: string,
+    entry: CachedEffectsMaterial,
+  ): void {
     if (this._effectsMaterialCache.has(key)) {
       this._effectsMaterialCache.delete(key);
     }
@@ -489,24 +525,29 @@ export class Group extends GroupRaw {
     e: GroupEffects,
     rtW: number,
   ): LayerStylesBuilder {
+    const q = e.quality ?? GroupRaw.defaultQuality;
     if (e.dropShadow.enabled) {
+      const dsQ = LAYER_KAWASE_QUALITY[q];
       b = b.dropShadow({
         color: e.dropShadow.color,
         opacity: e.dropShadow.opacity,
         angle: e.dropShadow.angle,
         distance: e.dropShadow.distancePx / rtW,
         spread: e.dropShadow.spread,
-        blurRadius: e.dropShadow.sizePx / (2 + 2 * DS_SIGMA),
-        sigma: DS_SIGMA,
+        blurRadius: e.dropShadow.sizePx / dsQ.blurDenom,
+        kawasePasses: dsQ.kawasePasses,
+        blurResolutionScale: dsQ.blurResolutionScale,
       });
     }
     if (e.outerGlow.enabled) {
+      const kq = LAYER_KAWASE_QUALITY[q];
       b = b.outerGlow({
         color: e.outerGlow.color,
         opacity: e.outerGlow.opacity,
         spread: e.outerGlow.spread,
-        blurRadius: e.outerGlow.sizePx / (2 + 2 * OG_SIGMA),
-        sigma: OG_SIGMA,
+        blurRadius: e.outerGlow.sizePx / kq.blurDenom,
+        kawasePasses: kq.kawasePasses,
+        blurResolutionScale: kq.blurResolutionScale,
       });
     }
     if (e.colorOverlay.enabled) {
@@ -526,24 +567,28 @@ export class Group extends GroupRaw {
       });
     }
     if (e.innerShadow.enabled) {
+      const kq = LAYER_KAWASE_QUALITY[q];
       b = b.innerShadow({
         color: e.innerShadow.color,
         opacity: e.innerShadow.opacity,
         angle: e.innerShadow.angle,
         distance: e.innerShadow.distancePx / rtW,
         choke: e.innerShadow.choke,
-        blurRadius: e.innerShadow.sizePx / (2 + 2 * IS_SIGMA),
-        sigma: IS_SIGMA,
+        blurRadius: e.innerShadow.sizePx / kq.blurDenom,
+        kawasePasses: kq.kawasePasses,
+        blurResolutionScale: kq.blurResolutionScale,
       });
     }
     if (e.innerGlow.enabled) {
+      const kq = LAYER_KAWASE_QUALITY[q];
       b = b.innerGlow({
         color: e.innerGlow.color,
         opacity: e.innerGlow.opacity,
         source: e.innerGlow.source,
         choke: e.innerGlow.choke,
-        blurRadius: e.innerGlow.sizePx / (2 + 2 * IG_SIGMA),
-        sigma: IG_SIGMA,
+        blurRadius: e.innerGlow.sizePx / kq.blurDenom,
+        kawasePasses: kq.kawasePasses,
+        blurResolutionScale: kq.blurResolutionScale,
       });
     }
     if (e.stroke.enabled) {
@@ -553,6 +598,7 @@ export class Group extends GroupRaw {
         opacity: e.stroke.opacity,
         position: e.stroke.position,
         size: this._strokeSizeUniform,
+        jfaQuality: q,
       });
     }
     return b;
@@ -584,10 +630,144 @@ export class Group extends GroupRaw {
     const blurOn = e.blur.enabled;
     const any = hasStyleEffects || layerOpacityOn || blurOn;
 
-    const rtW = this.renderTargetWidth > 0 ? this.renderTargetWidth : RT_FALLBACK;
+    const rtW =
+      this.renderTargetWidth > 0 ? this.renderTargetWidth : RT_FALLBACK;
 
     try {
-    if (blurOn) {
+      if (blurOn) {
+        if (e.gradientOverlay.enabled && e.gradientOverlay.stops.length > 0) {
+          const prevTex = this._gradientTexture;
+          if (prevTex && !this._gradientTextureReferencedInCache(prevTex)) {
+            prevTex.dispose();
+          }
+          this._gradientTexture = createGradientTexture(
+            colorStopsFromSerialized(e.gradientOverlay.stops),
+          );
+        } else {
+          const prevTex = this._gradientTexture;
+          if (prevTex && !this._gradientTextureReferencedInCache(prevTex)) {
+            prevTex.dispose();
+          }
+          this._gradientTexture = null;
+        }
+
+        let b = layerStyles(this);
+        b = this._applyStyleChain(b, e, rtW);
+
+        this._blurStackMat?.dispose();
+        const stackMat = new MeshBasicNodeMaterial({
+          transparent: true,
+          depthWrite: true,
+          side: 2,
+        });
+        stackMat.colorNode = b.node as MeshBasicNodeMaterial["colorNode"];
+        this._blurStackMat = stackMat;
+
+        const blurSigma = BLUR_LAYER_SIGMA[this._resolvedQuality()];
+        this._blurRadiusUniform.value = e.blur.sizePx / (2 + 2 * blurSigma);
+        if (layerOpacityOn) {
+          this._layerOpacityUniform.value = Math.min(
+            1,
+            Math.max(0, e.opacity.value),
+          );
+        }
+
+        this._blurFinalMat?.dispose();
+        const finalMat = new MeshBasicNodeMaterial({
+          transparent: true,
+          depthWrite: true,
+          side: 2,
+        });
+        const gb = gaussianBlur(
+          this._blurTexNode as never,
+          this._blurRadiusUniform,
+          blurSigma,
+        );
+        gb.premultipliedAlpha = true;
+        if (layerOpacityOn) {
+          const rgb = vec3(gb.r, gb.g, gb.b);
+          const a = gb.a;
+          finalMat.colorNode = vec4(
+            mul(rgb, this._layerOpacityUniform),
+            mul(a, this._layerOpacityUniform),
+          ) as MeshBasicNodeMaterial["colorNode"];
+        } else {
+          finalMat.colorNode = vec4(
+            gb.r,
+            gb.g,
+            gb.b,
+            gb.a,
+          ) as MeshBasicNodeMaterial["colorNode"];
+        }
+        this._blurFinalMat = finalMat;
+
+        this._releaseMaterialIfStale(prev);
+        this.effectsMaterial = finalMat;
+        return;
+      }
+
+      if (this._blurStackMat) {
+        this._blurStackMat.dispose();
+        this._blurStackMat = null;
+      }
+      if (this._blurFinalMat) {
+        this._blurFinalMat.dispose();
+        this._blurFinalMat = null;
+      }
+
+      const cacheKey = effectsMaterialCacheKey(e, rtW);
+      const cached = this._takeCachedEffectsMaterial(cacheKey);
+      if (cached) {
+        if (
+          this._gradientTexture &&
+          this._gradientTexture !== cached.gradientTex &&
+          !this._gradientTextureReferencedInCache(this._gradientTexture)
+        ) {
+          this._gradientTexture.dispose();
+        }
+        this._gradientTexture = cached.gradientTex;
+        if (e.stroke.enabled) {
+          this._strokeSizeUniform.value = e.stroke.sizePx;
+        }
+        if (layerOpacityOn) {
+          this._layerOpacityUniform.value = Math.min(
+            1,
+            Math.max(0, e.opacity.value),
+          );
+        }
+        this.effectsMaterial = cached.mat;
+        if (prev && prev !== cached.mat) {
+          this._releaseMaterialIfStale(prev);
+        }
+        return;
+      }
+
+      if (!any) {
+        const prevTex = this._gradientTexture;
+        if (prevTex && !this._gradientTextureReferencedInCache(prevTex)) {
+          prevTex.dispose();
+        }
+        this._gradientTexture = null;
+        const mat = new MeshBasicNodeMaterial({
+          transparent: true,
+          depthWrite: true,
+          side: 2,
+        });
+        mat.colorNode = this.mapNode as MeshBasicNodeMaterial["colorNode"];
+        this._cacheEffectsMaterial(cacheKey, { mat, gradientTex: null });
+        this.effectsMaterial = mat;
+        if (prev && prev !== mat) {
+          this._releaseMaterialIfStale(prev);
+        }
+        return;
+      }
+
+      const mat = new MeshBasicNodeMaterial({
+        transparent: true,
+        depthWrite: true,
+        side: 2,
+      });
+
       if (e.gradientOverlay.enabled && e.gradientOverlay.stops.length > 0) {
         const prevTex = this._gradientTexture;
         if (prevTex && !this._gradientTextureReferencedInCache(prevTex)) {
@@ -607,137 +787,23 @@ export class Group extends GroupRaw {
       let b = layerStyles(this);
       b = this._applyStyleChain(b, e, rtW);
 
-      this._blurStackMat?.dispose();
-      const stackMat = new MeshBasicNodeMaterial({
-        transparent: true,
-        depthWrite: true,
-        side: 2,
-      });
-      stackMat.colorNode = b.node as MeshBasicNodeMaterial["colorNode"];
-      this._blurStackMat = stackMat;
-
-      this._blurRadiusUniform.value = e.blur.sizePx / (2 + 2 * BLUR_SIGMA);
       if (layerOpacityOn) {
-        this._layerOpacityUniform.value = Math.min(1, Math.max(0, e.opacity.value));
+        this._layerOpacityUniform.value = Math.min(
+          1,
+          Math.max(0, e.opacity.value),
+        );
+        b = b.opacity({ value: this._layerOpacityUniform });
       }
 
-      this._blurFinalMat?.dispose();
-      const finalMat = new MeshBasicNodeMaterial({
-        transparent: true,
-        depthWrite: true,
-        side: 2,
+      mat.colorNode = b.node as MeshBasicNodeMaterial["colorNode"];
+      this._cacheEffectsMaterial(cacheKey, {
+        mat,
+        gradientTex: this._gradientTexture,
       });
-      const gb = gaussianBlur(this._blurTexNode as never, this._blurRadiusUniform, BLUR_SIGMA);
-      gb.premultipliedAlpha = true;
-      if (layerOpacityOn) {
-        const rgb = vec3(gb.r, gb.g, gb.b);
-        const a = gb.a;
-        finalMat.colorNode = vec4(
-          mul(rgb, this._layerOpacityUniform),
-          mul(a, this._layerOpacityUniform),
-        ) as MeshBasicNodeMaterial["colorNode"];
-      } else {
-        finalMat.colorNode = vec4(gb.r, gb.g, gb.b, gb.a) as MeshBasicNodeMaterial["colorNode"];
-      }
-      this._blurFinalMat = finalMat;
-
-      this._releaseMaterialIfStale(prev);
-      this.effectsMaterial = finalMat;
-      return;
-    }
-
-    if (this._blurStackMat) {
-      this._blurStackMat.dispose();
-      this._blurStackMat = null;
-    }
-    if (this._blurFinalMat) {
-      this._blurFinalMat.dispose();
-      this._blurFinalMat = null;
-    }
-
-    const cacheKey = effectsMaterialCacheKey(e, rtW);
-    const cached = this._takeCachedEffectsMaterial(cacheKey);
-    if (cached) {
-      if (
-        this._gradientTexture &&
-        this._gradientTexture !== cached.gradientTex &&
-        !this._gradientTextureReferencedInCache(this._gradientTexture)
-      ) {
-        this._gradientTexture.dispose();
-      }
-      this._gradientTexture = cached.gradientTex;
-      if (e.stroke.enabled) {
-        this._strokeSizeUniform.value = e.stroke.sizePx;
-      }
-      if (layerOpacityOn) {
-        this._layerOpacityUniform.value = Math.min(1, Math.max(0, e.opacity.value));
-      }
-      this.effectsMaterial = cached.mat;
-      if (prev && prev !== cached.mat) {
-        this._releaseMaterialIfStale(prev);
-      }
-      return;
-    }
-
-    if (!any) {
-      const prevTex = this._gradientTexture;
-      if (prevTex && !this._gradientTextureReferencedInCache(prevTex)) {
-        prevTex.dispose();
-      }
-      this._gradientTexture = null;
-      const mat = new MeshBasicNodeMaterial({
-        transparent: true,
-        depthWrite: true,
-        side: 2,
-      });
-      mat.colorNode = this.mapNode as MeshBasicNodeMaterial["colorNode"];
-      this._cacheEffectsMaterial(cacheKey, { mat, gradientTex: null });
       this.effectsMaterial = mat;
       if (prev && prev !== mat) {
         this._releaseMaterialIfStale(prev);
       }
-      return;
-    }
-
-    const mat = new MeshBasicNodeMaterial({
-      transparent: true,
-      depthWrite: true,
-      side: 2,
-    });
-
-    if (e.gradientOverlay.enabled && e.gradientOverlay.stops.length > 0) {
-      const prevTex = this._gradientTexture;
-      if (prevTex && !this._gradientTextureReferencedInCache(prevTex)) {
-        prevTex.dispose();
-      }
-      this._gradientTexture = createGradientTexture(
-        colorStopsFromSerialized(e.gradientOverlay.stops),
-      );
-    } else {
-      const prevTex = this._gradientTexture;
-      if (prevTex && !this._gradientTextureReferencedInCache(prevTex)) {
-        prevTex.dispose();
-      }
-      this._gradientTexture = null;
-    }
-
-    let b = layerStyles(this);
-    b = this._applyStyleChain(b, e, rtW);
-
-    if (layerOpacityOn) {
-      this._layerOpacityUniform.value = Math.min(1, Math.max(0, e.opacity.value));
-      b = b.opacity({ value: this._layerOpacityUniform });
-    }
-
-    mat.colorNode = b.node as MeshBasicNodeMaterial["colorNode"];
-    this._cacheEffectsMaterial(cacheKey, {
-      mat,
-      gradientTex: this._gradientTexture,
-    });
-    this.effectsMaterial = mat;
-    if (prev && prev !== mat) {
-      this._releaseMaterialIfStale(prev);
-    }
     } finally {
       this._touchEffectsDistanceRtWCommit(e, rtW);
     }
@@ -758,7 +824,11 @@ export class Group extends GroupRaw {
     if (w <= 0 || h <= 0) return;
     if (!this._blurStackMat) return;
 
-    if (!this._blurTarget || this._blurTargetW !== w || this._blurTargetH !== h) {
+    if (
+      !this._blurTarget ||
+      this._blurTargetW !== w ||
+      this._blurTargetH !== h
+    ) {
       this._blurTarget?.dispose();
       this._blurTarget = new RenderTarget(w, h, {
         minFilter: LinearFilter,
@@ -806,7 +876,8 @@ export class Group extends GroupRaw {
 
     if (e.stroke.enabled) {
       if (e.stroke.position === "outside") marginPx += e.stroke.sizePx;
-      else if (e.stroke.position === "center") marginPx += e.stroke.sizePx * 0.5;
+      else if (e.stroke.position === "center")
+        marginPx += e.stroke.sizePx * 0.5;
     }
     if (e.dropShadow.enabled) {
       marginPx += e.dropShadow.distancePx + e.dropShadow.sizePx + 4;
@@ -856,3 +927,5 @@ export class Group extends GroupRaw {
     super.dispose();
   }
 }
+
+export type { GroupEffectsQuality } from "./GroupRaw.js";

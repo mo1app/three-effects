@@ -8,8 +8,9 @@
  *  • Seed pass   : renders a fullscreen quad to `_seedRT`.
  *                  Each pixel stores its own UV coordinate if it is an alpha
  *                  boundary seed; otherwise stores a "no seed" sentinel.
- *  • JFA passes  : `MAX_JFA_PASSES` (=10) ping-pong passes between `_pingRT`
- *                  and `_pongRT`.  Step sizes halve each pass: N/2, N/4, … 1.
+ *  • JFA passes  : ping-pong between `_pingRT` and `_pongRT`. Pass count is
+ *                  `ceil(log2(max(w,h)))` (capped by quality — see {@link jfaPassCount}).
+ *                  Step sizes halve each pass: N/2, N/4, … 1.
  *                  Each pass writes the nearest-seed UV for every pixel.
  *  • Stroke mask : computed inline in the effects-material fragment shader by
  *                  reading the final JFA texture, computing the Euclidean pixel
@@ -50,8 +51,22 @@ import {
   vec4,
 } from "three/tsl";
 
-/** Number of JFA passes — covers textures up to 1024 × 1024 px exactly. */
-const MAX_JFA_PASSES = 10;
+/** Upper bound for JFA iterations (1024×1024 needs ceil(log2 1024) = 10). */
+const JFA_PASS_CAP_HIGH = 10;
+const JFA_PASS_CAP_FAST = 8;
+const JFA_PASS_MIN = 4;
+
+export type JfaQuality = "fast" | "high";
+
+/**
+ * JFA iteration count: `ceil(log2(max(width,height)))`, clamped by quality cap.
+ * Fewer passes for small effect RTs; **`fast`** caps at 8 (cheaper on large layers).
+ */
+export function jfaPassCount(maxDim: number, quality: JfaQuality): number {
+  const base = Math.ceil(Math.log2(Math.max(2, maxDim)));
+  const cap = quality === "fast" ? JFA_PASS_CAP_FAST : JFA_PASS_CAP_HIGH;
+  return Math.min(cap, Math.max(JFA_PASS_MIN, base));
+}
 
 /** Shared quad mesh — one instance suffices; passes are never concurrent. */
 const _quadMesh = /* @__PURE__ */ new QuadMesh();
@@ -85,6 +100,7 @@ class JFAStrokeNode extends TempNode {
    * `true`  → **inside** stroke  (seeds = alpha < 0.5 pixels).
    */
   seedInvert: boolean;
+  jfaQuality: JfaQuality;
 
   private readonly _texSize = uniform(new Vector2());
   private readonly _invSize = uniform(new Vector2());
@@ -122,11 +138,13 @@ class JFAStrokeNode extends TempNode {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     radiusPxNode: any,
     seedInvert = false,
+    jfaQuality: JfaQuality = "high",
   ) {
     super("vec4");
     this.textureNode = textureNode;
     this.radiusPxNode = radiusPxNode;
     this.seedInvert = seedInvert;
+    this.jfaQuality = jfaQuality;
 
     const rtOpts = { depthBuffer: false, type: HalfFloatType };
     this._seedRT = new RenderTarget(1, 1, rtOpts);
@@ -136,8 +154,7 @@ class JFAStrokeNode extends TempNode {
     // Internal ping-pong texture for JFA passes (value updated each pass).
     this._jfaInputTex = texture(this._seedRT.texture);
 
-    // Output texture: after MAX_JFA_PASSES=10 (even number of swaps starting
-    // from _seedRT), the final result lands in _pongRT.
+    // Output texture; `.value` is set each frame after the JFA loop.
     this._outputTexNode = texture(this._pongRT.texture);
     // Sample the JFA result with the Group's corrected UV so it aligns with
     // the effects-material's fragment UV space.
@@ -170,16 +187,15 @@ class JFAStrokeNode extends TempNode {
     _quadMesh.render(renderer);
 
     // ── 2. JFA passes (ping-pong) ─────────────────────────────────────────
-    // Step sequence: maxDim/2, maxDim/4, …, 1  (MAX_JFA_PASSES total)
-    // With MAX_JFA_PASSES=10 the final write goes to _pongRT (see analysis in
-    // the class docblock), so _outputTexNode can always point there.
+    // Step sequence: maxDim/2, maxDim/4, …; count from {@link jfaPassCount}.
     _quadMesh.material = this._jfaMaterial;
 
     let readRT = this._seedRT;
     let writeRT = this._pingRT;
     const maxDim = Math.max(W, H);
+    const numPasses = jfaPassCount(maxDim, this.jfaQuality);
 
-    for (let i = 0; i < MAX_JFA_PASSES; i++) {
+    for (let i = 0; i < numPasses; i++) {
       this._stepSize.value = Math.max(1, Math.round(maxDim / Math.pow(2, i + 1)));
       this._jfaInputTex.value = readRT.texture;
       renderer.setRenderTarget(writeRT);
@@ -189,7 +205,6 @@ class JFAStrokeNode extends TempNode {
       writeRT = tmp;
     }
 
-    // After 10 passes readRT holds the final result.  Update the output node.
     this._outputTexNode.value = readRT.texture;
 
     RendererUtils.restoreRendererState(renderer, _rendererState);
@@ -333,11 +348,16 @@ class JFAStrokeNode extends TempNode {
  *
  * @param node       Source texture node (e.g. `group.mapNode`).
  * @param radiusPx   Stroke half-width in **screen pixels** (uniform or float).
+ * @param jfaQuality Pass cap / cost; default **`high`** (full refinement on large RTs).
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function jfaOutsideStroke(node: any, radiusPx: any): any {
+export function jfaOutsideStroke(
+  node: any,
+  radiusPx: any,
+  jfaQuality: JfaQuality = "high",
+): any {
   return nodeObject(
-    new JFAStrokeNode(convertToTexture(node), radiusPx, false),
+    new JFAStrokeNode(convertToTexture(node), radiusPx, false, jfaQuality),
   );
 }
 
@@ -348,10 +368,15 @@ export function jfaOutsideStroke(node: any, radiusPx: any): any {
  *
  * @param node       Source texture node (e.g. `group.mapNode`).
  * @param radiusPx   Stroke half-width in **screen pixels** (uniform or float).
+ * @param jfaQuality Pass cap / cost; default **`high`**.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function jfaInsideStroke(node: any, radiusPx: any): any {
+export function jfaInsideStroke(
+  node: any,
+  radiusPx: any,
+  jfaQuality: JfaQuality = "high",
+): any {
   return nodeObject(
-    new JFAStrokeNode(convertToTexture(node), radiusPx, true),
+    new JFAStrokeNode(convertToTexture(node), radiusPx, true, jfaQuality),
   );
 }

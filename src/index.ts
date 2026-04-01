@@ -1,7 +1,7 @@
 export { Group } from "./Group.js";
 export { effectsMaterialCacheKey, RT_FALLBACK } from "./effectsMaterialCacheKey.js";
 export { GroupRaw, preRenderEffects } from "./GroupRaw.js";
-export type { RendererLike } from "./GroupRaw.js";
+export type { RendererLike, GroupEffectsQuality } from "./GroupRaw.js";
 export type {
   GroupEffects,
   GroupEffectsStroke,
@@ -32,4 +32,9 @@ export {
   sampleSerializedGradient,
 } from "./gradientTexture.js";
 export type { ColorStop, SerializedGradientStop } from "./gradientTexture.js";
-export { jfaOutsideStroke, jfaInsideStroke } from "./jfaStroke.js";
+export {
+  jfaOutsideStroke,
+  jfaInsideStroke,
+  jfaPassCount,
+} from "./jfaStroke.js";
+export type { JfaQuality } from "./jfaStroke.js";

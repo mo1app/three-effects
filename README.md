@@ -1,14 +1,14 @@
 # three-effects
 
-Photoshop-style **layer effects** for [Three.js](https://threejs.org/) **WebGPU**: stroke, drop shadow, outer glow, inner shadow / glow, overlays, a **layer blur**.
+Add Photoshop-style **layer effects** to [Three.js](https://threejs.org/) objects (stroke, shadows, glows, overlays and blur).
 
-**[GitHub repo](https://github.com/mo1app/three-effects) · [npm Package](https://www.npmjs.com/package/three-effects) · [Live Demo](https://three-effects.mo1.app)**
+**[GitHub repo](https://github.com/mo1app/three-effects) · [npm Package](https://www.npmjs.com/package/three-effects) · [Live demo](https://three-effects.mo1.app)**
 
 ## Quick start
 
 1. User **`Group`** from **`three-effects`** as a **`THREE.Group`** replacement.
 2. Configure the **`group.effects`**: each effect block needs to be manually **`enabled`**, and exposes parameters to be adjusted (see all below).
-3. Call **`preRenderEffects(renderer, scene, camera)`** once **before** **`renderer.render(scene, camera)`**.
+3. Call **`preRenderEffects(renderer, scene, camera)`** once **before** **`renderer.render(scene, camera)`** each frame. The billboard quad applies **camera-facing rotation** in its **`onBeforeRender`** (world quaternions) so orbit controls stay in sync even though capture runs earlier.
 
 ```ts
 import { Group, preRenderEffects } from "three-effects";
@@ -53,7 +53,9 @@ The interactive demo in this repo is under [`playground/`](./playground/README.m
 
 **`Group`** extends **`THREE.Group`**. Add meshes (or other objects) as children; the library fits a **billboard quad** to their **screen-space bounding box**, draws them into a **cropped render target** each frame, and runs a built-in **layer-style** shader on that texture. You configure everything through **`g.effects`**: toggle blocks with **`enabled`**, set colors, blur sizes in pixels, and so on. **`effectsEnabled`** defaults to **`true`**.
 
-Call **`preRenderEffects(renderer, scene, camera)`** (or **`GroupRaw.preRenderEffects`**) **once per frame before** **`renderer.render(scene, camera)`** so every effects group can run its offscreen pass in the right order.
+**`g.effects.quality`** is optional. When it is omitted or **`undefined`**, **`Group`** uses **`GroupRaw.defaultQuality`** (default **`"fast"`**). **`Group.defaultQuality`** is an alias: reading or writing it updates the same static field, so you can set a global default once (e.g. **`Group.defaultQuality = "high"`**) before creating groups. Changing the static after materials are built does not rebuild them; assign **`g.effects.quality`** per instance to override, or set the static at startup.
+
+Call **`preRenderEffects(renderer, scene, camera)`** (or **`GroupRaw.preRenderEffects`**) **once per frame before** **`renderer.render`**. It syncs **`scene` / `camera`** world matrices for the offscreen pass. Billboard **rotation** tracks the camera in the quad’s **`onBeforeRender`** so orbit lag stays minimal. You may alternatively invoke **`preRenderEffects`** from **`scene.onBeforeRender`**; nested offscreen **`renderer.render`** calls skip re-entry automatically.
 
 Changes that require a **new shader graph** are **deferred**: assigning to **`g.effects`** or calling **`applyEffects(fn)`** only marks the material stale. The graph is rebuilt **at most once per frame** inside **`preRenderEffects`**, after the group’s render-target size for that frame is known (so blur and distance math stay correct). You do not need to batch updates by hand for performance.
 
@@ -86,17 +88,20 @@ scene.add(g);
 
 The **playground** (`npm run dev`) toggles **`debug`** for its demo groups from the Layers panel **Helpers** button; that preference is stored with the rest of the playground UI in **`localStorage`**.
 
+If the effects quad ever looks wrong relative to the camera, typical checks are: call **`controls.update()`** (or equivalent) **before** **`preRenderEffects`**, and use a WebGPU frame capture tool (e.g. **Spector.js**) or temporary logging of **`camera.matrixWorld`** vs your expectations.
+
 ## Layer effects
 
 Each effect is a property on **`g.effects`**. Set **`enabled: true`** to turn it on. Field-by-field reference tables are in the **[g.effects reference](#reference-geffects-property-tables)** section.
 
+- **`quality`** — optional **`"fast"`** or **`"high"`**; if unset, **`GroupRaw.defaultQuality`** / **`Group.defaultQuality`** apply. See **[quality](#quality)**. Affects **drop shadow**, **outer glow**, **inner shadow**, and **inner glow** (shared **Kawase** preset: passes + internal RT scale) and **layer blur** (Gaussian sigma).
 - **[stroke](#stroke)** — outline around the silhouette; **JFA** distance field; width in screen pixels.
-- **[dropShadow](#dropshadow)** — offset, blurred shadow behind the layer.
-- **[outerGlow](#outerglow)** — glow outside the alpha boundary.
+- **[dropShadow](#dropshadow)** — offset, blurred shadow behind the layer (cost scales with **`quality`**).
+- **[outerGlow](#outerglow)** — glow outside the alpha boundary (blur cost scales with **`quality`**, same Kawase preset as drop shadow).
 - **[colorOverlay](#coloroverlay)** — solid tint over the layer (masked by alpha).
 - **[gradientOverlay](#gradientoverlay)** — linear or radial gradient over the layer; uses **`stops`** (`#rrggbb` + position); see also **[Gradients](#gradients)**.
-- **[innerShadow](#innershadow)** — recessed shadow along the inside edge.
-- **[innerGlow](#innerglow)** — glow from the inner edge or from the center.
+- **[innerShadow](#innershadow)** — recessed shadow along the inside edge (blur cost scales with **`quality`**).
+- **[innerGlow](#innerglow)** — glow from the inner edge or from the center (blur cost scales with **`quality`**).
 - **[blur](#blur)** — blurs the **fully composited** result (after stroke); **before** layer opacity. Radius in screen pixels.
 - **[opacity](#opacity)** — multiplies final RGBA after the other styles.
 
@@ -114,11 +119,11 @@ Build 1×N gradient **`DataTexture`** ramps for overlays:
 
 ## TypeScript
 
-Types are published under **`dist`**. Import from **`three-effects`**; types for effect blocks live under names like **`GroupEffects`**, **`GroupEffectsBlur`**, **`DropShadowOptions`**, **`BlurOptions`**, etc.
+Types are published under **`dist`**. Import from **`three-effects`**; types for effect blocks live under names like **`GroupEffects`**, **`GroupEffectsQuality`**, **`GroupEffectsBlur`**, **`DropShadowOptions`**, **`BlurOptions`**, etc.
 
 ## Low-level API: `GroupRaw` and `layerStyles`
 
-For full control, use **`GroupRaw`**: same billboard and render-target capture as **`Group`**, but you supply **`effectsMaterial`** yourself and read the captured texture from **`mapNode`** (and **`createOffsetSample`** for offsets). You still call **`preRenderEffects`** before the main render.
+For full control, use **`GroupRaw`**: same billboard and render-target capture as **`Group`**, but you supply **`effectsMaterial`** yourself and read the captured texture from **`mapNode`** (and **`createOffsetSample`** for offsets). You still call **`preRenderEffects`** before the main render each frame.
 
 **`layerStyles(group)`** returns a fluent **`LayerStylesBuilder`**: chain **`.dropShadow()`**, **`.outerGlow()`**, **`.stroke()`**, … and use **`.node`** as the **`vec4`** color node on **`MeshBasicNodeMaterial`**. **`Group`** uses this internally; with **`GroupRaw`** you compose your own stack. Omitted methods stay off. Effect order matches the high-level pipeline above.
 
@@ -151,6 +156,14 @@ Stroke **`size`** in **`layerStyles`** can be expressed in pixels (aligned with 
 
 Access fields as **`g.effects.<name>.<field>`**. Every block has **`enabled`**. **`color`** fields are **`THREE.Color`** (e.g. **`color.set(0xffffff)`**).
 
+### quality
+
+Optional top-level field **`g.effects.quality`**: **`"fast"`** | **`"high"`**. If omitted or **`undefined`**, the effective preset is **`GroupRaw.defaultQuality`** (writable static, default **`"fast"`**). **`Group.defaultQuality`** reads and writes that same value.
+
+**Drop shadow**, **outer glow**, **inner shadow**, and **inner glow** share one **Kawase** multi-pass blur preset (not separable Gaussian): **`fast`** = fewer passes + half-resolution internal targets; **`high`** = more passes + full resolution. Blur **radius** in screen pixels still comes from each effect’s **`sizePx`** (and drop shadow’s **`sizePx`**), mapped with the same **`blurDenom`** scale per quality tier. **Layer blur** (`g.effects.blur`) stays **Gaussian** (two-pass); **`fast`** uses a smaller sigma than **`high`**. **Stroke** (JFA) runs fewer flood passes when **`fast`** (cap 8 vs 10) and fewer still on small effect textures (`ceil(log2(max(w,h)))`). Set **`high`** when you want maximum refinement at higher GPU cost.
+
+**`effectsMaterialCacheKey`** resolves omitted **`quality`** the same way, so LRU entries stay consistent with **`Group`**.
+
 ### stroke
 
 `g.effects.stroke`
@@ -167,27 +180,27 @@ Access fields as **`g.effects.<name>.<field>`**. Every block has **`enabled`**. 
 
 `g.effects.dropShadow`
 
-| Property     | Type      | Notes                                               |
-| ------------ | --------- | --------------------------------------------------- |
-| `enabled`    | `boolean` |                                                     |
-| `opacity`    | `number`  |                                                     |
-| `angle`      | `number`  | Lighting angle in degrees (shadow offset opposite). |
-| `distancePx` | `number`  | Offset length in pixels.                            |
-| `spread`     | `number`  | `0…1`, matte expansion before blur.                 |
-| `sizePx`     | `number`  | Blur size in pixels.                                |
-| `color`      | `Color`   |                                                     |
+| Property     | Type      | Notes                                                                              |
+| ------------ | --------- | ---------------------------------------------------------------------------------- |
+| `enabled`    | `boolean` |                                                                                    |
+| `opacity`    | `number`  |                                                                                    |
+| `angle`      | `number`  | Lighting angle in degrees (shadow offset opposite).                                |
+| `distancePx` | `number`  | Offset length in pixels.                                                           |
+| `spread`     | `number`  | `0…1`, matte expansion before blur.                                                |
+| `sizePx`     | `number`  | Blur size in pixels (Kawase; pass count / internal RT scale follow **`quality`**). |
+| `color`      | `Color`   |                                                                                    |
 
 ### outerGlow
 
 `g.effects.outerGlow`
 
-| Property  | Type      | Notes                |
-| --------- | --------- | -------------------- |
-| `enabled` | `boolean` |                      |
-| `opacity` | `number`  |                      |
-| `spread`  | `number`  | `0…1`.               |
-| `sizePx`  | `number`  | Blur size in pixels. |
-| `color`   | `Color`   |                      |
+| Property  | Type      | Notes                                                                   |
+| --------- | --------- | ----------------------------------------------------------------------- |
+| `enabled` | `boolean` |                                                                         |
+| `opacity` | `number`  |                                                                         |
+| `spread`  | `number`  | `0…1`.                                                                  |
+| `sizePx`  | `number`  | Blur size in pixels (Kawase; same **`quality`** preset as drop shadow). |
+| `color`   | `Color`   |                                                                         |
 
 ### colorOverlay
 
@@ -217,28 +230,28 @@ Access fields as **`g.effects.<name>.<field>`**. Every block has **`enabled`**. 
 
 `g.effects.innerShadow`
 
-| Property     | Type      | Notes                             |
-| ------------ | --------- | --------------------------------- |
-| `enabled`    | `boolean` |                                   |
-| `opacity`    | `number`  |                                   |
-| `angle`      | `number`  | Degrees.                          |
-| `distancePx` | `number`  | Offset in pixels.                 |
-| `choke`      | `number`  | `0…1`, shrinks matte before blur. |
-| `sizePx`     | `number`  | Blur size in pixels.              |
-| `color`      | `Color`   |                                   |
+| Property     | Type      | Notes                                                                   |
+| ------------ | --------- | ----------------------------------------------------------------------- |
+| `enabled`    | `boolean` |                                                                         |
+| `opacity`    | `number`  |                                                                         |
+| `angle`      | `number`  | Degrees.                                                                |
+| `distancePx` | `number`  | Offset in pixels.                                                       |
+| `choke`      | `number`  | `0…1`, shrinks matte before blur.                                       |
+| `sizePx`     | `number`  | Blur size in pixels (Kawase; same **`quality`** preset as drop shadow). |
+| `color`      | `Color`   |                                                                         |
 
 ### innerGlow
 
 `g.effects.innerGlow`
 
-| Property  | Type      | Notes                   |
-| --------- | --------- | ----------------------- |
-| `enabled` | `boolean` |                         |
-| `opacity` | `number`  |                         |
-| `source`  | `string`  | `"edge"` or `"center"`. |
-| `choke`   | `number`  | `0…1`.                  |
-| `sizePx`  | `number`  | Blur size in pixels.    |
-| `color`   | `Color`   |                         |
+| Property  | Type      | Notes                                                                   |
+| --------- | --------- | ----------------------------------------------------------------------- |
+| `enabled` | `boolean` |                                                                         |
+| `opacity` | `number`  |                                                                         |
+| `source`  | `string`  | `"edge"` or `"center"`.                                                 |
+| `choke`   | `number`  | `0…1`.                                                                  |
+| `sizePx`  | `number`  | Blur size in pixels (Kawase; same **`quality`** preset as drop shadow). |
+| `color`   | `Color`   |                                                                         |
 
 ### blur
 

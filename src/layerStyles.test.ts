@@ -26,7 +26,7 @@ describe("layerStyles", () => {
         distance: 0.01,
         spread: 0,
         blurRadius: 1,
-        sigma: 12,
+        kawasePasses: 4,
       })
       .stroke({
         color: new Color(0x111111),
@@ -98,14 +98,14 @@ describe("layerStyles", () => {
           distance: 0.02,
           spread: 0,
           blurRadius: 2,
-          sigma: 12,
+          kawasePasses: 4,
         })
         .outerGlow({
           color: new Color(0xffff00),
           opacity: 0.3,
           spread: 0,
           blurRadius: 2,
-          sigma: 8,
+          kawasePasses: 4,
         })
         .colorOverlay({ color: new Color(0xff0000), opacity: 0.2 })
         .gradientOverlay({
@@ -123,7 +123,7 @@ describe("layerStyles", () => {
           distance: 0.01,
           choke: 0,
           blurRadius: 1,
-          sigma: 8,
+          kawasePasses: 4,
         })
         .innerGlow({
           color: new Color(0xffffff),
@@ -131,7 +131,7 @@ describe("layerStyles", () => {
           source: "edge",
           choke: 0,
           blurRadius: 2,
-          sigma: 8,
+          kawasePasses: 4,
         })
         .stroke({
           color: new Color(0),

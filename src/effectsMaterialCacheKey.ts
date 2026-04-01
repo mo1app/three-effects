@@ -1,4 +1,5 @@
 import type { GroupEffects } from "./Group.js";
+import { GroupRaw } from "./GroupRaw.js";
 
 export const RT_FALLBACK = 200;
 
@@ -32,7 +33,10 @@ export function effectsMaterialCacheKey(e: GroupEffects, rtW: number): string {
     return JSON.stringify({ lo: 1 });
   }
 
-  const o: Record<string, unknown> = { rtW: w };
+  const o: Record<string, unknown> = {
+    rtW: w,
+    q: e.quality ?? GroupRaw.defaultQuality,
+  };
   if (e.dropShadow.enabled) {
     o.ds = {
       c: e.dropShadow.color.getHexString(),

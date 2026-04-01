@@ -17,6 +17,7 @@ import {
   Light,
   Texture,
   Node,
+  Quaternion,
 } from "three/webgpu";
 import { texture as textureNode, uv, vec2, uniform } from "three/tsl";
 
@@ -28,7 +29,12 @@ export interface RendererLike {
   getSize(target: Vector2): Vector2;
   getPixelRatio(): number;
   getViewport(target: Vector4): Vector4;
-  setViewport(x: number | Vector4, y?: number, width?: number, height?: number): void;
+  setViewport(
+    x: number | Vector4,
+    y?: number,
+    width?: number,
+    height?: number,
+  ): void;
   getRenderTarget(): RenderTarget | null;
   setRenderTarget(target: RenderTarget | null): void;
   getClearColor(target: Color): Color;
@@ -51,6 +57,9 @@ const _wBR = new Vector3();
 const _wTL = new Vector3();
 const _wCenter = new Vector3();
 const _wDebug = new Vector3();
+const _camWorldQ = new Quaternion();
+const _parentWorldQ = new Quaternion();
+const _billboardLocalQ = new Quaternion();
 const _rendererSize = new Vector2();
 const _savedClearColor = new Color();
 const _savedViewport = new Vector4();
@@ -66,6 +75,12 @@ interface NDCBounds {
   nMaxZ: number;
   ndcZ: number;
 }
+
+/**
+ * GPU cost / visual preset for {@link Group} layer effects (blur, stroke) when
+ * {@link GroupEffects.quality} is left unset.
+ */
+export type GroupEffectsQuality = "fast" | "high";
 
 // ─── GroupRaw ────────────────────────────────────────────────────────────────
 
@@ -86,13 +101,22 @@ interface NDCBounds {
  * group.add(myMesh);
  * scene.add(group);
  *
- * // In your render loop — must come before renderer.render():
  * GroupRaw.preRenderEffects(renderer, scene, camera);
- * // or: preRenderEffects(renderer, scene, camera);
  * renderer.render(scene, camera);
  * ```
  */
 export class GroupRaw extends ThreeGroup {
+  /**
+   * Used when {@link Group.effects.quality} is `undefined`: {@link Group} resolves
+   * Kawase blur, layer blur sigma, stroke JFA passes, and material cache keys against
+   * this value. {@link Group.defaultQuality} reads and writes the same backing field.
+   *
+   * Changing this after groups were built does not invalidate their materials; set it
+   * at startup or assign `effects.quality` per group.
+   * @default "fast"
+   */
+  static defaultQuality: GroupEffectsQuality = "fast";
+
   /**
    * Uniform padding applied around the projected bounding box on all sides.
    * Expressed as a fraction of the screen height (NDC-Y units), so the visual
@@ -162,8 +186,8 @@ export class GroupRaw extends ThreeGroup {
   // UV remapping uniforms — updated each frame to handle cases where the
   // content NDC bbox is clamped to the renderer bounds (render target < full bbox).
   // Default (1,-1) / (0,1) is the identity Y-flip for WebGPU render targets.
-  private readonly _uvScale  = uniform(new Vector2(1, -1));
-  private readonly _uvOffset = uniform(new Vector2(0,  1));
+  private readonly _uvScale = uniform(new Vector2(1, -1));
+  private readonly _uvOffset = uniform(new Vector2(0, 1));
 
   private _target: RenderTarget | null = null;
   private _targetW = 0;
@@ -188,6 +212,13 @@ export class GroupRaw extends ThreeGroup {
   // Static registry of all effectsEnabled groups
   private static readonly _registry = new Set<GroupRaw>();
 
+  /**
+   * While {@link GroupRaw.preRenderEffects} is running the outer capture pass,
+   * nested `renderer.render` calls (offscreen) must not recurse into another
+   * capture — `scene.onBeforeRender` would fire again.
+   */
+  private static _effectsCaptureNest = 0;
+
   // ── effectsEnabled getter/setter ──────────────────────────────────────────
 
   /**
@@ -209,11 +240,11 @@ export class GroupRaw extends ThreeGroup {
     this._plane.visible = v;
     if (v) {
       GroupRaw._registry.add(this);
-      this._setContentLayer(0, false);           // hide from main camera
+      this._setContentLayer(0, false); // hide from main camera
       this._setContentLayer(SHARED_LAYER, true); // expose to internal camera
     } else {
       GroupRaw._registry.delete(this);
-      this._setContentLayer(0, true);             // restore normal visibility
+      this._setContentLayer(0, true); // restore normal visibility
       this._setContentLayer(SHARED_LAYER, false); // remove from effects layer
     }
   }
@@ -298,7 +329,10 @@ export class GroupRaw extends ThreeGroup {
    */
   createOffsetSample(uvOffsetNode: Node): ReturnType<typeof textureNode> {
     const uvRemapped = uv().mul(this._uvScale).add(this._uvOffset);
-    const node = textureNode(this._placeholderTex, uvRemapped.add(uvOffsetNode));
+    const node = textureNode(
+      this._placeholderTex,
+      uvRemapped.add(uvOffsetNode),
+    );
     // If a render target is already allocated (effects were previously active),
     // seed the node with the real texture immediately so GaussianBlurNode can
     // read its dimensions on the very first frame — not just on resize.
@@ -335,7 +369,9 @@ export class GroupRaw extends ThreeGroup {
    * axis-aligned bounds (same center used for {@link _computeNDCBounds} `ndcZ`).
    * Used to convert screen-pixel margins to NDC {@link padding} at the content depth.
    */
-  protected _getContentWorldCenterDistance(camera: PerspectiveCamera): number | null {
+  protected _getContentWorldCenterDistance(
+    camera: PerspectiveCamera,
+  ): number | null {
     let wMinX = Infinity,
       wMaxX = -Infinity;
     let wMinY = Infinity,
@@ -366,12 +402,16 @@ export class GroupRaw extends ThreeGroup {
 
     if (!hasVerts) return null;
 
-    _v.set(
-      (wMinX + wMaxX) * 0.5,
-      (wMinY + wMaxY) * 0.5,
-      (wMinZ + wMaxZ) * 0.5,
-    );
+    _v.set((wMinX + wMaxX) * 0.5, (wMinY + wMaxY) * 0.5, (wMinZ + wMaxZ) * 0.5);
     return _v.distanceTo(camera.position);
+  }
+
+  /** Face the billboard to the camera for this draw (world quats; parent-aware). */
+  private _syncPlaneBillboardToCamera(camera: Camera): void {
+    camera.getWorldQuaternion(_camWorldQ);
+    this.getWorldQuaternion(_parentWorldQ);
+    _billboardLocalQ.copy(_parentWorldQ).invert().multiply(_camWorldQ);
+    this._plane.quaternion.copy(_billboardLocalQ);
   }
 
   // ── constructor ───────────────────────────────────────────────────────────
@@ -414,8 +454,12 @@ export class GroupRaw extends ThreeGroup {
     this._plane.add(this.debugGroup);
 
     this._plane.onBeforeRender = (renderer, _scene, camera) => {
-      // Billboard
-      this._plane.quaternion.copy(camera.quaternion);
+      // Ensure world matrices match this draw before unproject / worldToLocal.
+      // Otherwise the camera can be current while an ancestor group is still on
+      // a stale matrixWorld for this frame — looks like a tilted quad even when
+      // sampled quaternions match between preRender and here.
+      camera.updateWorldMatrix(true, false);
+      this.updateWorldMatrix(true, false);
 
       // For effects groups, use the bounds already computed in preRenderEffects.
       // For plain groups, compute fresh here.
@@ -423,7 +467,11 @@ export class GroupRaw extends ThreeGroup {
         ? this._ndcBounds
         : this._computeNDCBounds(camera);
 
-      if (!bounds) return;
+      if (!bounds) {
+        this._syncPlaneBillboardToCamera(camera);
+        this._plane.updateWorldMatrix(false, true);
+        return;
+      }
 
       const { nMinX, nMaxX, nMinY, nMaxY, ndcZ } = bounds;
 
@@ -481,6 +529,10 @@ export class GroupRaw extends ThreeGroup {
         right.scale.set(lx, 1 - ly * 2, 1);
         right.position.set(0.5 - lx * 0.5, 0, 0.001);
       }
+
+      // Last: face camera for this draw (see _syncPlaneBillboardToCamera).
+      this._syncPlaneBillboardToCamera(camera);
+      this._plane.updateWorldMatrix(false, true);
     };
 
     this.add(this._plane);
@@ -492,14 +544,23 @@ export class GroupRaw extends ThreeGroup {
    * Renders every registered (i.e. `effectsEnabled = true`) group's content
    * into its private render target for this frame.
    *
-   * **Must be called once per frame, before `renderer.render(scene, camera)`.**
+   * Call **once per frame before** `renderer.render(scene, camera)` (typical
+   * animation loop). World matrices are synced here so NDC bounds and the
+   * internal capture camera match your controllers. The billboard quad’s
+   * **orientation** is applied later in its **`onBeforeRender`** from the
+   * camera’s **world** quaternion so it tracks orbit rotation without lag even
+   * when capture runs earlier in the frame.
    *
    * ```ts
    * renderer.setAnimationLoop(() => {
+   *   controls.update();
    *   GroupRaw.preRenderEffects(renderer, scene, camera);
    *   renderer.render(scene, camera);
    * });
    * ```
+   *
+   * Optionally, you may invoke the same function from **`scene.onBeforeRender`**
+   * instead; nested `renderer.render` calls inside the library skip re-entry.
    *
    * @param renderer - The active WebGPU renderer.
    * @param scene    - The scene being rendered.
@@ -510,20 +571,40 @@ export class GroupRaw extends ThreeGroup {
     scene: Scene,
     camera: PerspectiveCamera,
   ): void {
-    for (const group of GroupRaw._registry) {
-      group._renderToTarget(renderer, scene, camera);
+    if (GroupRaw._effectsCaptureNest > 0) return;
+    GroupRaw._effectsCaptureNest++;
+    try {
+      // When invoked before render(), controllers have updated local pose but
+      // world matrices may not be flushed yet — mirror the start of
+      // WebGPURenderer.render(). When invoked from scene.onBeforeRender, this
+      // is redundant but cheap.
+      if (scene.matrixWorldAutoUpdate === true) scene.updateMatrixWorld();
+      if (camera.parent === null && camera.matrixWorldAutoUpdate === true) {
+        camera.updateMatrixWorld();
+      }
+      for (const group of GroupRaw._registry) {
+        group._renderToTarget(renderer, scene, camera);
+      }
+    } finally {
+      GroupRaw._effectsCaptureNest--;
     }
   }
 
   // ── private helpers ───────────────────────────────────────────────────────
 
   private _computeNDCBounds(camera: Camera): NDCBounds | null {
-    let nMinX = Infinity,  nMaxX = -Infinity;
-    let nMinY = Infinity,  nMaxY = -Infinity;
-    let nMinZ = Infinity,  nMaxZ = -Infinity;
-    let wMinX = Infinity,  wMaxX = -Infinity;
-    let wMinY = Infinity,  wMaxY = -Infinity;
-    let wMinZ = Infinity,  wMaxZ = -Infinity;
+    let nMinX = Infinity,
+      nMaxX = -Infinity;
+    let nMinY = Infinity,
+      nMaxY = -Infinity;
+    let nMinZ = Infinity,
+      nMaxZ = -Infinity;
+    let wMinX = Infinity,
+      wMaxX = -Infinity;
+    let wMinY = Infinity,
+      wMaxY = -Infinity;
+    let wMinZ = Infinity,
+      wMaxZ = -Infinity;
     let hasVerts = false;
 
     for (const child of this.children) {
@@ -608,9 +689,12 @@ export class GroupRaw extends ThreeGroup {
     // the clip-space W is negative, flipping the divide and corrupting X/Y too.
     const outsideFrustum =
       !bounds ||
-      bounds.nMaxX < -1 || bounds.nMinX > 1 ||
-      bounds.nMaxY < -1 || bounds.nMinY > 1 ||
-      bounds.nMinZ >  1 || bounds.nMaxZ < -1;
+      bounds.nMaxX < -1 ||
+      bounds.nMinX > 1 ||
+      bounds.nMaxY < -1 ||
+      bounds.nMinY > 1 ||
+      bounds.nMinZ > 1 ||
+      bounds.nMaxZ < -1;
 
     if (outsideFrustum) {
       this._plane.visible = false;
@@ -643,12 +727,12 @@ export class GroupRaw extends ThreeGroup {
     const fullNdcW = nMaxX - nMinX;
     const fullNdcH = nMaxY - nMinY;
     this._uvScale.value.set(
-      fullNdcW / visNdcW,           // scaleU: stretches U across the full bbox
-      -(fullNdcH / visNdcH),        // scaleV: negated for Y-flip
+      fullNdcW / visNdcW, // scaleU: stretches U across the full bbox
+      -(fullNdcH / visNdcH), // scaleV: negated for Y-flip
     );
     this._uvOffset.value.set(
-      (nMinX - visNdcMinX) / visNdcW,           // offsetU
-      (visNdcMaxY - nMinY) / visNdcH,           // offsetV (Y-flipped)
+      (nMinX - visNdcMinX) / visNdcW, // offsetU
+      (visNdcMaxY - nMinY) / visNdcH, // offsetV (Y-flipped)
     );
 
     // Allocate a cropped render target sized to the bbox — not full-screen
@@ -686,12 +770,12 @@ export class GroupRaw extends ThreeGroup {
     // Sync the internal camera from the main camera so the scene renders from
     // the same viewpoint. Main camera is never modified — no restore needed.
     const ic = this._internalCamera;
-    ic.fov    = camera.fov;
+    ic.fov = camera.fov;
     ic.aspect = camera.aspect;
-    ic.near   = camera.near;
-    ic.far    = camera.far;
-    ic.zoom   = camera.zoom ?? 1;
-    ic.view   = camera.view ? { ...camera.view } : null;
+    ic.near = camera.near;
+    ic.far = camera.far;
+    ic.zoom = camera.zoom ?? 1;
+    ic.view = camera.view ? { ...camera.view } : null;
     ic.matrixWorld.copy(camera.matrixWorld);
     ic.matrixWorldInverse.copy(camera.matrixWorldInverse);
     // setViewOffset zooms the projection into the bbox pixel region,
@@ -814,7 +898,8 @@ export class GroupRaw extends ThreeGroup {
 }
 
 /**
- * Ergonomic alias for {@link GroupRaw.preRenderEffects} — same implementation.
+ * Ergonomic alias for {@link GroupRaw.preRenderEffects} — same implementation
+ * (including nested-render guard).
  */
 export function preRenderEffects(
   renderer: RendererLike,

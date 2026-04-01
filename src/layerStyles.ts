@@ -1,4 +1,4 @@
-import { Color, Texture } from "three/webgpu";
+import { Color, Texture, Vector2 } from "three/webgpu";
 import {
   PI,
   clamp,
@@ -20,34 +20,68 @@ import {
   vec4,
 } from "three/tsl";
 import { gaussianBlur } from "three/addons/tsl/display/GaussianBlurNode.js";
-import { jfaOutsideStroke, jfaInsideStroke } from "./jfaStroke.js";
+import { kawaseBlur } from "./kawaseBlurNode.js";
+import {
+  jfaOutsideStroke,
+  jfaInsideStroke,
+  type JfaQuality,
+} from "./jfaStroke.js";
 import { GroupRaw } from "./GroupRaw.js";
 
 /**
  * Applies separable Gaussian blur with premultiplied alpha so RGB does not bleed
  * across transparent edges (same idea as the playground halo / drop shadow).
+ *
+ * @param resolutionScale — `GaussianBlurNode` internal resolution factor (`1` = full texture; `0.5` = half, fewer pixels per pass).
  */
 function blurPremult(
   src: ReturnType<typeof texture>,
   /** Blur radius / direction node (uniform scalar is accepted at runtime). */
   radius: ReturnType<typeof uniform<number>>,
   sigma: number,
+  resolutionScale = 1,
 ) {
   const b = gaussianBlur(src, radius as never, sigma);
   b.premultipliedAlpha = true;
+  if (resolutionScale < 1 && resolutionScale > 0) {
+    const gn = b as unknown as { resolution: Vector2 };
+    gn.resolution.set(resolutionScale, resolutionScale);
+  }
+  return b;
+}
+
+/**
+ * Kawase multi-pass blur (premultiplied) for layer styles that need soft alpha
+ * (drop shadow, outer glow, inner shadow, inner glow). Same node shape as `gaussianBlur`.
+ */
+function blurKawasePremult(
+  src: ReturnType<typeof texture>,
+  radius: ReturnType<typeof uniform<number>>,
+  passes: number,
+  resolutionScale = 1,
+): ReturnType<typeof gaussianBlur> {
+  const b = kawaseBlur(src, radius as never, passes) as ReturnType<
+    typeof gaussianBlur
+  > & { resolution: Vector2 };
+  b.premultipliedAlpha = true;
+  if (resolutionScale < 1 && resolutionScale > 0) {
+    b.resolution.set(resolutionScale, resolutionScale);
+  }
   return b;
 }
 
 /**
  * Maps to Photoshop **Drop Shadow**: shadow color, global opacity, lighting angle,
- * offset distance, spread (matte expansion before blur), blur size, and kernel quality.
+ * offset distance, spread (matte expansion before blur), blur size.
+ *
+ * Blur is implemented with a **Kawase** multi-pass filter (not separable Gaussian).
  *
  * - **Angle** — Lighting direction in degrees (0° = +X, 90° = +Y in UV space).
  *   The shadow is offset opposite to the light (shadow falls away from the light).
  * - **Distance** — Offset length in **UV space** (0–1 relative to the layer quad).
  * - **Spread** — `0…1`; expands the shadow matte before blur (Photoshop 0–100%).
- * - **Blur radius** — Passed to {@link gaussianBlur} as the direction scale (wider blur).
- * - **Sigma** — Fixed kernel radius `3 + 2 * sigma` taps; higher = smoother / more expensive.
+ * - **Blur radius** — Direction scale for each Kawase pass (wider blur).
+ * - **kawasePasses** — Number of Kawase iterations (each pass = 5 taps). Kept even internally.
  */
 export interface DropShadowOptions {
   /** Shadow RGB (sRGB). @default `#000000` */
@@ -63,15 +97,21 @@ export interface DropShadowOptions {
   distance?: number;
   /** Matte expansion before blur, `0…1`. @default `0` */
   spread?: number;
-  /** Blur strength (Gaussian direction scale). @default `2` */
+  /** Blur strength (direction scale per Kawase pass). @default `2` */
   blurRadius?: number;
-  /** Gaussian sigma (kernel quality). @default `12` */
-  sigma?: number;
+  /** Kawase iterations (even). @default `4` */
+  kawasePasses?: number;
+  /**
+   * Scale for internal blur render target dimensions.
+   * `1` = full resolution; `0.5` = half (faster).
+   * @default `1`
+   */
+  blurResolutionScale?: number;
 }
 
 /**
  * Maps to Photoshop **Outer Glow**: color or 1D gradient texture, opacity, spread,
- * size (blur), and kernel sigma. Gradient is sampled at `u = clamp(2 * ring, 0, 1)`.
+ * blur size (**Kawase**). Gradient is sampled at `u = clamp(2 * ring, 0, 1)`.
  */
 export interface OuterGlowOptions {
   /** Solid glow color when `gradientTexture` is omitted. @default `#ffff00` */
@@ -82,9 +122,15 @@ export interface OuterGlowOptions {
   opacity?: number;
   /** Matte expansion before blur, `0…1`. @default `0` */
   spread?: number;
-  /** Blur strength. @default `4` */
+  /** Blur strength (direction scale per Kawase pass). @default `4` */
   blurRadius?: number;
-  /** Gaussian sigma. @default `8` */
+  /** Kawase iterations (even). @default `4` */
+  kawasePasses?: number;
+  /** Internal blur RT scale. @default `1` */
+  blurResolutionScale?: number;
+  /**
+   * @deprecated Gaussian path removed; use Kawase fields. Ignored.
+   */
   sigma?: number;
 }
 
@@ -123,7 +169,7 @@ export interface GradientOverlayOptions {
 
 /**
  * Maps to Photoshop **Inner Shadow**: recessed shadow inside the layer edge — color,
- * opacity, angle, distance, choke (matte shrink before blur), blur size, sigma.
+ * opacity, angle, distance, choke, blur (**Kawase**).
  */
 export interface InnerShadowOptions {
   /** Shadow color. @default `#000000` */
@@ -136,15 +182,19 @@ export interface InnerShadowOptions {
   distance?: number;
   /** Shrinks the matte before blur, `0…1`. @default `0` */
   choke?: number;
-  /** Blur strength. @default `1` */
+  /** Blur strength (direction scale per Kawase pass). @default `1` */
   blurRadius?: number;
-  /** Gaussian sigma. @default `8` */
+  /** Kawase iterations (even). @default `4` */
+  kawasePasses?: number;
+  /** Internal blur RT scale. @default `1` */
+  blurResolutionScale?: number;
+  /** @deprecated Ignored. */
   sigma?: number;
 }
 
 /**
  * Maps to Photoshop **Inner Glow** — **Edge** vs **Center** source, color or gradient,
- * opacity, choke, blur size, sigma.
+ * opacity, choke, blur (**Kawase**).
  */
 export interface InnerGlowOptions {
   /** Solid color when no gradient. @default `#ffffff` */
@@ -159,9 +209,13 @@ export interface InnerGlowOptions {
   source?: "edge" | "center";
   /** Inner matte shrink, `0…1`. @default `0` */
   choke?: number;
-  /** Blur strength. @default `2` */
+  /** Blur strength (direction scale per Kawase pass). @default `2` */
   blurRadius?: number;
-  /** Gaussian sigma. @default `8` */
+  /** Kawase iterations (even). @default `4` */
+  kawasePasses?: number;
+  /** Internal blur RT scale. @default `1` */
+  blurResolutionScale?: number;
+  /** @deprecated Ignored. */
   sigma?: number;
 }
 
@@ -233,6 +287,12 @@ export interface StrokeOptions {
    * Kept for backwards compatibility; will be ignored.
    */
   sigma?: number;
+  /**
+   * JFA refinement: **`fast`** caps passes at 8; **`high`** at 10, with both
+   * scaling down on small effect textures. Default **`high`** when omitted
+   * ({@link Group} passes {@link GroupEffects.quality}).
+   */
+  jfaQuality?: JfaQuality;
 }
 
 /**
@@ -383,14 +443,16 @@ export class LayerStylesBuilder {
       const dsDistance = uniform(ds.distance ?? 0.02);
       const dsSpread = uniform(ds.spread ?? 0);
       const dsBlurR = uniform(ds.blurRadius ?? 2);
-      const dsSigma = ds.sigma ?? 12;
+      const dsPasses = ds.kawasePasses ?? 4;
+      const dsBlurRes = ds.blurResolutionScale ?? 1;
       const dsRad = dsAngle.mul(PI).div(180);
       const dsOff = vec2(cos(dsRad), sin(dsRad)).mul(dsDistance).negate();
       const shadowSrc = this._group.createOffsetSample(dsOff);
-      const shadowBlur = blurPremult(
+      const shadowBlur = blurKawasePremult(
         shadowSrc as ReturnType<typeof texture>,
         dsBlurR,
-        dsSigma,
+        dsPasses,
+        dsBlurRes,
       );
       const shadowRawA = shadowBlur.a;
       const shadowSpreadA = smoothstep(
@@ -409,8 +471,9 @@ export class LayerStylesBuilder {
       const ogOpacity = uniform(og.opacity ?? 0.8);
       const ogSpread = uniform(og.spread ?? 0);
       const ogBlurR = uniform(og.blurRadius ?? 4);
-      const ogSigma = og.sigma ?? 8;
-      const ogBlur = blurPremult(srcTex, ogBlurR, ogSigma);
+      const ogPasses = og.kawasePasses ?? 4;
+      const ogBlurRes = og.blurResolutionScale ?? 1;
+      const ogBlur = blurKawasePremult(srcTex, ogBlurR, ogPasses, ogBlurRes);
       const ogRingRaw = max(float(0), ogBlur.a.sub(srcA));
       const ogRing = smoothstep(
         float(0),
@@ -468,11 +531,17 @@ export class LayerStylesBuilder {
       const isDist = uniform(ins.distance ?? 0.01);
       const isChoke = uniform(ins.choke ?? 0);
       const isBlurR = uniform(ins.blurRadius ?? 1);
-      const isSigma = ins.sigma ?? 8;
+      const isPasses = ins.kawasePasses ?? 4;
+      const isBlurRes = ins.blurResolutionScale ?? 1;
       const isRad = isAngle.mul(PI).div(180);
       const isOff = vec2(cos(isRad), sin(isRad)).mul(isDist);
       const innerSrc = this._group.createOffsetSample(isOff);
-      const innerBlur = blurPremult(innerSrc as ReturnType<typeof texture>, isBlurR, isSigma);
+      const innerBlur = blurKawasePremult(
+        innerSrc as ReturnType<typeof texture>,
+        isBlurR,
+        isPasses,
+        isBlurRes,
+      );
       const raw = srcA.mul(float(1).sub(innerBlur.a).clamp(0, 1));
       innerShadowMask = smoothstep(isChoke, float(1), raw).mul(isOp).mul(srcA);
       rgb = mix(rgb, vec3(isColor), innerShadowMask);
@@ -484,8 +553,9 @@ export class LayerStylesBuilder {
       const igOp = uniform(ig.opacity ?? 0.5);
       const igChoke = uniform(ig.choke ?? 0);
       const igBlurR = uniform(ig.blurRadius ?? 2);
-      const igSigma = ig.sigma ?? 8;
-      const igBlur = blurPremult(srcTex, igBlurR, igSigma);
+      const igPasses = ig.kawasePasses ?? 4;
+      const igBlurRes = ig.blurResolutionScale ?? 1;
+      const igBlur = blurKawasePremult(srcTex, igBlurR, igPasses, igBlurRes);
       const edgeBand = max(
         float(0),
         srcA.sub(smoothstep(igChoke, float(1), igBlur.a)),
@@ -520,6 +590,7 @@ export class LayerStylesBuilder {
           ? uniform(st.size ?? 10)
           : st.size;
       const pos = st.position ?? "outside";
+      const jfq: JfaQuality = st.jfaQuality ?? "high";
 
       if (pos === "outside") {
         // jfaOutsideStroke returns an *expanded fill* mask: all pixels within `stSize`
@@ -532,21 +603,21 @@ export class LayerStylesBuilder {
         //
         // This eliminates the transparent gap that appears at anti-aliased edges when the
         // stroke is naively limited to srcA < 0.5.
-        const jfa = jfaOutsideStroke(srcTex, stSize);
+        const jfa = jfaOutsideStroke(srcTex, stSize, jfq);
         const expanded = jfa.r.mul(stOp);
         rgb = mix(rgb, mix(vec3(stColor), rgb, srcA), expanded);
         strokeMask = expanded;
       } else if (pos === "inside") {
         // Stroke extends inward — seeds are alpha < 0.5 pixels.
-        const jfa = jfaInsideStroke(srcTex, stSize);
+        const jfa = jfaInsideStroke(srcTex, stSize, jfq);
         strokeMask = jfa.r.mul(stOp);
         rgb = mix(rgb, vec3(stColor), strokeMask);
       } else {
         // Center: half the radius extends outward, half inward.
         // Outside half uses expanded-fill compositing; inside half uses standard mixing.
         const halfSize = stSize.div(float(2));
-        const jfaOut = jfaOutsideStroke(srcTex, halfSize);
-        const jfaIn = jfaInsideStroke(srcTex, halfSize);
+        const jfaOut = jfaOutsideStroke(srcTex, halfSize, jfq);
+        const jfaIn = jfaInsideStroke(srcTex, halfSize, jfq);
         const expandedOut = jfaOut.r.mul(stOp);
         const maskIn = jfaIn.r.mul(stOp);
         // Apply outside (expanded fill) first, then inside on top.

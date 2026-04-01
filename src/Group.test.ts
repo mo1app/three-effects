@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import { Group } from "./Group.js";
+import { GroupRaw } from "./GroupRaw.js";
 
 describe("Group", () => {
   let g: Group;
@@ -8,8 +9,34 @@ describe("Group", () => {
     g = new Group();
   });
 
+  afterEach(() => {
+    GroupRaw.defaultQuality = "fast";
+  });
+
   it("exposes effects and effectsMaterial after construction", () => {
     expect(g.effects).toBeDefined();
+    expect(g.effectsMaterial).not.toBeNull();
+  });
+
+  it("leaves effects.quality unset by default", () => {
+    expect(g.effects.quality).toBeUndefined();
+  });
+
+  it("syncs Group.defaultQuality with GroupRaw.defaultQuality", () => {
+    Group.defaultQuality = "high";
+    expect(GroupRaw.defaultQuality).toBe("high");
+    GroupRaw.defaultQuality = "fast";
+    expect(Group.defaultQuality).toBe("fast");
+  });
+
+  it("builds stroke material when quality is unset (uses defaultQuality)", () => {
+    GroupRaw.defaultQuality = "high";
+    g.applyEffects((e) => {
+      e.stroke.enabled = true;
+      e.stroke.sizePx = 6;
+    });
+    g.commitEffects();
+    expect(g.effects.quality).toBeUndefined();
     expect(g.effectsMaterial).not.toBeNull();
   });
 
