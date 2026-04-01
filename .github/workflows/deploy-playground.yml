@@ -1,6 +1,7 @@
-# Build the playground and deploy to GitHub Pages (project site: /repo-name/).
+# Build the playground and deploy to GitHub Pages.
 # Repo → Settings → Pages → Build and deployment: Source = GitHub Actions.
-# After you add a custom domain, set VITE_BASE to / in the env block below.
+# Custom domain (or org/user *.github.io at site root): VITE_BASE must be /.
+# If you use only https://<owner>.github.io/<repo>/ (no custom domain), set VITE_BASE to /<repo>/.
 
 name: Deploy playground
 
@@ -31,7 +32,7 @@ jobs:
       - name: Build playground
         run: npm run build:playground
         env:
-          VITE_BASE: /${{ github.event.repository.name }}/
+          VITE_BASE: /
       - uses: actions/upload-pages-artifact@v3
         with:
           path: playground/dist

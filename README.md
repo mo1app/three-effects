@@ -1,6 +1,6 @@
 # three-effects
 
-![three-effects playground demo: Layer Styles and live stroke on a 3D duck](docs/three-effects-playground.jpg)
+![three-effects playground demo: Layer Styles and live stroke on a 3D duck](https://raw.githubusercontent.com/mo1app/three-effects/main/docs/three-effects-playground.jpg)
 
 Add Photoshop-style **layer effects** to [Three.js](https://threejs.org/) objects (stroke, shadows, glows, overlays and blur).
 
@@ -272,18 +272,6 @@ Optional top-level field **`g.effects.quality`**: **`"fast"`** | **`"high"`**. I
 | --------- | --------- | --------------------------------------------------- |
 | `enabled` | `boolean` | Layer-wide multiply on RGBA after other styles.     |
 | `value`   | `number`  | `0…1`. Updates without shader rebuild when enabled. |
-
-## Publishing
-
-Always use the npm script so **tests run before** the package is uploaded (`prepublishOnly` still runs **`npm run build`** automatically):
-
-```bash
-npm version patch   # or minor / major — updates package.json, commit + git tag
-npm run publish:npm # same as: npm test && npm publish
-git push && git push origin --tags
-```
-
-Do **not** run bare `npm publish`; use **`npm run publish:npm`** every time.
 
 ## License
 
