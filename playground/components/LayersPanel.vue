@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import LayerStyleDialog from "./LayerStyleDialog.vue";
 import {
   buildAllGroupsSceneSnapshot,
@@ -23,15 +23,8 @@ function toggleVisibility(id: string) {
   props.toggleLayerVisibility?.(id);
 }
 
-const styleDialogLayer = computed(() => {
-  const id = editorModel.value.ui.layerStyleOpenLayerId;
-  if (!id) return null;
-  return props.layers.find((l) => l.id === id) ?? null;
-});
 const { isShaking, triggerShake } = useShake();
 const panelRoot = ref<HTMLElement | null>(null);
-const dragging = ref(false);
-let dragStart = { x: 0, y: 0, px: 0, py: 0 };
 
 watch(
   () => props.layers,
@@ -40,43 +33,9 @@ watch(
     if (ui.layersSelectedIndex >= layers.length) {
       ui.layersSelectedIndex = Math.max(0, layers.length - 1);
     }
-    if (ui.layerStyleOpenLayerId && !layers.some((l) => l.id === ui.layerStyleOpenLayerId)) {
-      ui.layerStyleOpenLayerId = null;
-      ui.gradientEditorOpen = false;
-    }
   },
   { deep: true, immediate: true },
 );
-
-function onHeaderPointerDown(e: PointerEvent) {
-  if ((e.target as HTMLElement).closest("button")) return;
-  dragging.value = true;
-  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  const p = editorModel.value.ui.layersPanel;
-  dragStart = {
-    x: e.clientX,
-    y: e.clientY,
-    px: p.x,
-    py: p.y,
-  };
-}
-
-function onHeaderPointerMove(e: PointerEvent) {
-  if (!dragging.value) return;
-  const p = editorModel.value.ui.layersPanel;
-  p.x = dragStart.px + (e.clientX - dragStart.x);
-  p.y = dragStart.py + (e.clientY - dragStart.y);
-}
-
-function onHeaderPointerUp(e: PointerEvent) {
-  if (!dragging.value) return;
-  dragging.value = false;
-  try {
-    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-  } catch {
-    /* ignore */
-  }
-}
 
 function noop() {
   triggerShake();
@@ -92,17 +51,30 @@ function onPanelPointerDown(e: PointerEvent) {
 }
 
 function openStyleDialog(layer: LayerItem) {
-  editorModel.value.ui.layerStyleOpenLayerId = layer.id;
-}
-
-function closeStyleDialog() {
-  editorModel.value.ui.layerStyleOpenLayerId = null;
-  editorModel.value.ui.gradientEditorOpen = false;
+  const i = props.layers.findIndex((l) => l.id === layer.id);
+  if (i >= 0) editorModel.value.ui.layersSelectedIndex = i;
 }
 
 function openStyleDialogForSelection() {
   const layer = props.layers[editorModel.value.ui.layersSelectedIndex];
   if (layer) openStyleDialog(layer);
+}
+
+function openStyleDialogAtEffect(
+  layerIndex: number,
+  _layer: LayerItem,
+  effectId: EffectId,
+) {
+  const ui = editorModel.value.ui;
+  ui.layersSelectedIndex = layerIndex;
+  ui.layerStyleSelectedEffect = effectId;
+  ui.gradientEditorOpen = false;
+  void nextTick(() => {
+    document.getElementById(`layer-style-panel-${effectId}`)?.scrollIntoView({
+      block: "nearest",
+      behavior: "smooth",
+    });
+  });
 }
 
 function subEffects(layerId: string) {
@@ -209,28 +181,14 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <LayerStyleDialog
-    v-if="styleDialogLayer"
-    :layer="styleDialogLayer"
-    @close="closeStyleDialog"
-  />
+  <LayerStyleDialog v-if="selectedLayer" :layer="selectedLayer" />
   <div
     ref="panelRoot"
     class="layers-panel"
     :class="{ 'shake-anim': isShaking }"
-    :style="{
-      left: `${editorModel.ui.layersPanel.x}px`,
-      top: `${editorModel.ui.layersPanel.y}px`,
-    }"
     @pointerdown.capture="onPanelPointerDown"
   >
-    <header
-      class="panel-header"
-      @pointerdown="onHeaderPointerDown"
-      @pointermove="onHeaderPointerMove"
-      @pointerup="onHeaderPointerUp"
-      @pointercancel="onHeaderPointerUp"
-    >
+    <header class="panel-header">
       <span class="tab-label">Layers</span>
       <span class="header-spacer" />
       <button
@@ -363,6 +321,8 @@ onUnmounted(() => {
             v-for="fx in subEffects(layer.id)"
             :key="fx.id"
             class="effect-subrow"
+            title="Double-click to open Layer Style"
+            @dblclick.stop="openStyleDialogAtEffect(i, layer, fx.id)"
           >
             <span
               class="eye effect-eye"
@@ -402,6 +362,9 @@ onUnmounted(() => {
 <style scoped>
 .layers-panel {
   position: fixed;
+  top: 40px;
+  left: 20px;
+  z-index: 25;
   width: 240px;
   pointer-events: auto;
   font-family:
@@ -427,11 +390,7 @@ onUnmounted(() => {
   padding: 4px 6px;
   background: linear-gradient(180deg, #d0d0d0 0%, #b0b0b0 100%);
   border-bottom: 1px solid #6a6a6a;
-  cursor: grab;
-  touch-action: none;
-}
-.panel-header:active {
-  cursor: grabbing;
+  cursor: default;
 }
 
 .tab-label {

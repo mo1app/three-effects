@@ -159,13 +159,12 @@ export const LAYER_EFFECTS_META: { id: EffectId; label: string; plus?: boolean }
 
 export type PanelPosition = { x: number; y: number };
 
-/** Floating panel layout and open state (persisted). */
+/**
+ * Persisted playground UI. Layers panel and Layer Style positions are fixed in CSS;
+ * only the gradient editor stores x/y (draggable).
+ */
 export type PlaygroundUiState = {
-  layersPanel: PanelPosition;
-  layerStyleDialog: PanelPosition;
   gradientEditor: PanelPosition;
-  /** Layer id for open Layer Style dialog, or `null`. */
-  layerStyleOpenLayerId: string | null;
   gradientEditorOpen: boolean;
   layersSelectedIndex: number;
   layerStyleSelectedEffect: EffectId;
@@ -204,10 +203,7 @@ const defaultLayerOpacity = (): LayerOpacityState => ({
 
 function defaultPlaygroundUi(): PlaygroundUiState {
   return {
-    layersPanel: { x: 16, y: 104 },
-    layerStyleDialog: { x: 280, y: 104 },
     gradientEditor: { x: 120, y: 120 },
-    layerStyleOpenLayerId: null,
     gradientEditorOpen: false,
     layersSelectedIndex: 0,
     layerStyleSelectedEffect: "stroke",
@@ -219,50 +215,60 @@ function layersShapeCompatible(stored: LayerItem[] | undefined, defaults: LayerI
   return defaults.every((d, i) => stored[i]?.id === d.id);
 }
 
+/** Keep saved visibility/opacity; refresh labels and swatch colors when defaults change (e.g. renames). */
+function syncLayerPresentationFromDefaults(
+  storedLayers: LayerItem[],
+  defaults: LayerItem[],
+): LayerItem[] {
+  const byId = new Map(defaults.map((l) => [l.id, l]));
+  return storedLayers.map((l) => {
+    const d = byId.get(l.id);
+    if (!d) return l;
+    return {
+      ...l,
+      name: d.name,
+      color: d.color,
+    };
+  });
+}
+
 function mergePlaygroundEditorState(stored: Partial<EditorModel>, defaults: EditorModel): EditorModel {
   const merged: EditorModel = {
     ...defaults,
     ...stored,
     layers: layersShapeCompatible(stored.layers, defaults.layers)
-      ? stored.layers!
+      ? syncLayerPresentationFromDefaults(stored.layers!, defaults.layers)
       : defaults.layers,
     effects: { ...defaults.effects, ...stored.effects },
-    ui: {
-      ...defaults.ui,
-      ...stored.ui,
-      layersPanel: { ...defaults.ui.layersPanel, ...stored.ui?.layersPanel },
-      layerStyleDialog: { ...defaults.ui.layerStyleDialog, ...stored.ui?.layerStyleDialog },
-      gradientEditor: { ...defaults.ui.gradientEditor, ...stored.ui?.gradientEditor },
-      layerStyleOpenLayerId:
-        stored.ui?.layerStyleOpenLayerId !== undefined
-          ? stored.ui.layerStyleOpenLayerId
-          : defaults.ui.layerStyleOpenLayerId,
-      gradientEditorOpen:
-        stored.ui?.gradientEditorOpen ?? defaults.ui.gradientEditorOpen,
-      layersSelectedIndex:
-        typeof stored.ui?.layersSelectedIndex === "number"
-          ? stored.ui.layersSelectedIndex
-          : defaults.ui.layersSelectedIndex,
-      layerStyleSelectedEffect:
-        (stored.ui?.layerStyleSelectedEffect as EffectId | undefined) ??
-        defaults.ui.layerStyleSelectedEffect,
-    },
+    ui: (() => {
+      const su = stored.ui;
+      return {
+        gradientEditor: {
+          ...defaults.ui.gradientEditor,
+          ...su?.gradientEditor,
+        },
+        gradientEditorOpen:
+          su?.gradientEditorOpen ?? defaults.ui.gradientEditorOpen,
+        layersSelectedIndex:
+          typeof su?.layersSelectedIndex === "number"
+            ? su.layersSelectedIndex
+            : defaults.ui.layersSelectedIndex,
+        layerStyleSelectedEffect:
+          (su?.layerStyleSelectedEffect as EffectId | undefined) ??
+          defaults.ui.layerStyleSelectedEffect,
+      } satisfies PlaygroundUiState;
+    })(),
   };
 
   const ui = merged.ui;
   if (ui.layersSelectedIndex >= merged.layers.length) {
     ui.layersSelectedIndex = Math.max(0, merged.layers.length - 1);
   }
-  const ids = new Set(merged.layers.map((l) => l.id));
-  if (ui.layerStyleOpenLayerId && !ids.has(ui.layerStyleOpenLayerId)) {
-    ui.layerStyleOpenLayerId = null;
-    ui.gradientEditorOpen = false;
-  }
 
   return merged;
 }
 
-/** Initial scene: layer visibility/opacity + effects (clipboard snapshot, Mar 2026). */
+/** Initial scene: layer visibility/opacity + effects (playground defaults). */
 const PLAYGROUND_DEFAULT_EFFECTS = {
   group: {
     stroke: {
@@ -271,40 +277,40 @@ const PLAYGROUND_DEFAULT_EFFECTS = {
       sizePx: 25,
       position: "outside" as const,
       opacity: 1,
-      color: "#b34700",
+      color: "#ff2600",
     },
     colorOverlay: {
       initialized: true,
       enabled: false,
-      opacity: 0.13,
-      color: "#ffdd00",
+      opacity: 1,
+      color: "#fff700",
     },
     blur: {
       initialized: true,
       enabled: false,
-      sizePx: 10,
+      sizePx: 50,
     },
     dropShadow: {
       initialized: true,
       enabled: true,
-      opacity: 0.75,
-      angle: 120,
-      distancePx: 50,
-      spread: 0,
-      sizePx: 35,
+      opacity: 1,
+      angle: 122,
+      distancePx: 33,
+      spread: 0.17,
+      sizePx: 40,
       color: "#000000",
     },
   },
   groupB: {
     blur: {
       initialized: true,
-      enabled: true,
+      enabled: false,
       sizePx: 14,
     },
     stroke: {
       initialized: true,
       enabled: true,
-      sizePx: 27,
+      sizePx: 13,
       position: "outside" as const,
       opacity: 1,
       color: "#8f70ff",
@@ -343,11 +349,11 @@ const PLAYGROUND_DEFAULT_EFFECTS = {
     dropShadow: {
       initialized: true,
       enabled: true,
-      opacity: 1,
+      opacity: 0.33,
       angle: 95,
       distancePx: 12,
       spread: 0,
-      sizePx: 23,
+      sizePx: 7,
       color: "#000000",
     },
   },
@@ -367,17 +373,17 @@ function createDefaultEditorModel(): EditorModel {
       },
       {
         id: "groupA",
-        name: "sphere A",
+        name: "sphere",
         color: "#ff6600",
         visible: true,
-        opacity: { enabled: true, value: 0.93 },
+        opacity: { enabled: true, value: 1 },
       },
       {
         id: "groupB",
-        name: "sphere B",
+        name: "box",
         color: "#ff0066",
         visible: true,
-        opacity: { enabled: true, value: 1 },
+        opacity: { enabled: true, value: 0.79 },
       },
     ],
     effects: JSON.parse(JSON.stringify(PLAYGROUND_DEFAULT_EFFECTS)) as EditorModel["effects"],

@@ -28,10 +28,6 @@ const props = defineProps<{
   layer: LayerItem;
 }>();
 
-const emit = defineEmits<{
-  close: [];
-}>();
-
 const selectedEffect = computed({
   get: () => editorModel.value.ui.layerStyleSelectedEffect,
   set: (v: EffectId) => {
@@ -45,39 +41,6 @@ function dialogEffectEnabled(id: EffectId): boolean {
 
 const dialogRoot = ref<HTMLElement | null>(null);
 const { isShaking, triggerShake } = useShake();
-
-const dragging = ref(false);
-let dragStart = { x: 0, y: 0, px: 0, py: 0 };
-
-function onHeaderPointerDown(e: PointerEvent) {
-  if ((e.target as HTMLElement).closest("button, input, label")) return;
-  dragging.value = true;
-  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  const p = editorModel.value.ui.layerStyleDialog;
-  dragStart = {
-    x: e.clientX,
-    y: e.clientY,
-    px: p.x,
-    py: p.y,
-  };
-}
-
-function onHeaderPointerMove(e: PointerEvent) {
-  if (!dragging.value) return;
-  const p = editorModel.value.ui.layerStyleDialog;
-  p.x = dragStart.px + (e.clientX - dragStart.x);
-  p.y = dragStart.py + (e.clientY - dragStart.y);
-}
-
-function onHeaderPointerUp(e: PointerEvent) {
-  if (!dragging.value) return;
-  dragging.value = false;
-  try {
-    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-  } catch {
-    /* ignore */
-  }
-}
 
 function noop() {
   triggerShake();
@@ -93,10 +56,6 @@ function onDialogPointerDown(e: PointerEvent) {
   ) {
     triggerShake();
   }
-}
-
-function close() {
-  emit("close");
 }
 
 function selectEffect(id: EffectId) {
@@ -121,18 +80,28 @@ function onEffectCheckboxChange(id: EffectId, ev: Event) {
 
 /** Reactive stroke row for this layer (undefined until stroke is checked once). */
 const strokeState = computed(
-  () => editorModel.value.effects[props.layer.id]?.stroke as StrokeEffectState | undefined,
+  () =>
+    editorModel.value.effects[props.layer.id]?.stroke as
+      | StrokeEffectState
+      | undefined,
 );
 
-function patchStroke(partial: Partial<Pick<StrokeEffectState, "sizePx" | "position" | "opacity" | "color">>) {
-  const s = editorModel.value.effects[props.layer.id]?.stroke as StrokeEffectState | undefined;
+function patchStroke(
+  partial: Partial<
+    Pick<StrokeEffectState, "sizePx" | "position" | "opacity" | "color">
+  >,
+) {
+  const s = editorModel.value.effects[props.layer.id]?.stroke as
+    | StrokeEffectState
+    | undefined;
   if (!s?.initialized) return;
   Object.assign(s, partial);
 }
 
 const strokeOpacityPercent = computed({
   get: () => Math.round((strokeState.value?.opacity ?? 1) * 100),
-  set: (v: number) => patchStroke({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
+  set: (v: number) =>
+    patchStroke({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
 });
 
 function onStrokeOpacityInput(e: Event) {
@@ -140,43 +109,60 @@ function onStrokeOpacityInput(e: Event) {
 }
 
 const colorOverlayState = computed(
-  () => editorModel.value.effects[props.layer.id]?.colorOverlay as ColorOverlayEffectState | undefined,
+  () =>
+    editorModel.value.effects[props.layer.id]?.colorOverlay as
+      | ColorOverlayEffectState
+      | undefined,
 );
 
 function patchColorOverlay(
   partial: Partial<Pick<ColorOverlayEffectState, "opacity" | "color">>,
 ) {
-  const s = editorModel.value.effects[props.layer.id]?.colorOverlay as ColorOverlayEffectState | undefined;
+  const s = editorModel.value.effects[props.layer.id]?.colorOverlay as
+    | ColorOverlayEffectState
+    | undefined;
   if (!s?.initialized) return;
   Object.assign(s, partial);
 }
 
 const colorOverlayOpacityPercent = computed({
   get: () => Math.round((colorOverlayState.value?.opacity ?? 1) * 100),
-  set: (v: number) => patchColorOverlay({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
+  set: (v: number) =>
+    patchColorOverlay({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
 });
 
 function onColorOverlayOpacityInput(e: Event) {
-  colorOverlayOpacityPercent.value = Number((e.target as HTMLInputElement).value);
+  colorOverlayOpacityPercent.value = Number(
+    (e.target as HTMLInputElement).value,
+  );
 }
 
 const dropShadowState = computed(
-  () => editorModel.value.effects[props.layer.id]?.dropShadow as DropShadowEffectState | undefined,
+  () =>
+    editorModel.value.effects[props.layer.id]?.dropShadow as
+      | DropShadowEffectState
+      | undefined,
 );
 
 function patchDropShadow(
   partial: Partial<
-    Pick<DropShadowEffectState, "opacity" | "angle" | "distancePx" | "spread" | "sizePx" | "color">
+    Pick<
+      DropShadowEffectState,
+      "opacity" | "angle" | "distancePx" | "spread" | "sizePx" | "color"
+    >
   >,
 ) {
-  const s = editorModel.value.effects[props.layer.id]?.dropShadow as DropShadowEffectState | undefined;
+  const s = editorModel.value.effects[props.layer.id]?.dropShadow as
+    | DropShadowEffectState
+    | undefined;
   if (!s?.initialized) return;
   Object.assign(s, partial);
 }
 
 const dropShadowOpacityPercent = computed({
   get: () => Math.round((dropShadowState.value?.opacity ?? 0.75) * 100),
-  set: (v: number) => patchDropShadow({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
+  set: (v: number) =>
+    patchDropShadow({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
 });
 
 function onDropShadowOpacityInput(e: Event) {
@@ -185,7 +171,8 @@ function onDropShadowOpacityInput(e: Event) {
 
 const dropShadowSpreadPercent = computed({
   get: () => Math.round((dropShadowState.value?.spread ?? 0) * 100),
-  set: (v: number) => patchDropShadow({ spread: Math.min(100, Math.max(0, v)) / 100 }),
+  set: (v: number) =>
+    patchDropShadow({ spread: Math.min(100, Math.max(0, v)) / 100 }),
 });
 
 function onDropShadowSpreadInput(e: Event) {
@@ -193,31 +180,43 @@ function onDropShadowSpreadInput(e: Event) {
 }
 
 const innerShadowState = computed(
-  () => editorModel.value.effects[props.layer.id]?.innerShadow as InnerShadowEffectState | undefined,
+  () =>
+    editorModel.value.effects[props.layer.id]?.innerShadow as
+      | InnerShadowEffectState
+      | undefined,
 );
 
 function patchInnerShadow(
   partial: Partial<
-    Pick<InnerShadowEffectState, "color" | "opacity" | "angle" | "distancePx" | "choke" | "sizePx">
+    Pick<
+      InnerShadowEffectState,
+      "color" | "opacity" | "angle" | "distancePx" | "choke" | "sizePx"
+    >
   >,
 ) {
-  const s = editorModel.value.effects[props.layer.id]?.innerShadow as InnerShadowEffectState | undefined;
+  const s = editorModel.value.effects[props.layer.id]?.innerShadow as
+    | InnerShadowEffectState
+    | undefined;
   if (!s?.initialized) return;
   Object.assign(s, partial);
 }
 
 const innerShadowOpacityPercent = computed({
   get: () => Math.round((innerShadowState.value?.opacity ?? 0.6) * 100),
-  set: (v: number) => patchInnerShadow({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
+  set: (v: number) =>
+    patchInnerShadow({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
 });
 
 function onInnerShadowOpacityInput(e: Event) {
-  innerShadowOpacityPercent.value = Number((e.target as HTMLInputElement).value);
+  innerShadowOpacityPercent.value = Number(
+    (e.target as HTMLInputElement).value,
+  );
 }
 
 const innerShadowChokePercent = computed({
   get: () => Math.round((innerShadowState.value?.choke ?? 0) * 100),
-  set: (v: number) => patchInnerShadow({ choke: Math.min(100, Math.max(0, v)) / 100 }),
+  set: (v: number) =>
+    patchInnerShadow({ choke: Math.min(100, Math.max(0, v)) / 100 }),
 });
 
 function onInnerShadowChokeInput(e: Event) {
@@ -225,20 +224,31 @@ function onInnerShadowChokeInput(e: Event) {
 }
 
 const innerGlowState = computed(
-  () => editorModel.value.effects[props.layer.id]?.innerGlow as InnerGlowEffectState | undefined,
+  () =>
+    editorModel.value.effects[props.layer.id]?.innerGlow as
+      | InnerGlowEffectState
+      | undefined,
 );
 
 function patchInnerGlow(
-  partial: Partial<Pick<InnerGlowEffectState, "color" | "opacity" | "source" | "choke" | "sizePx">>,
+  partial: Partial<
+    Pick<
+      InnerGlowEffectState,
+      "color" | "opacity" | "source" | "choke" | "sizePx"
+    >
+  >,
 ) {
-  const s = editorModel.value.effects[props.layer.id]?.innerGlow as InnerGlowEffectState | undefined;
+  const s = editorModel.value.effects[props.layer.id]?.innerGlow as
+    | InnerGlowEffectState
+    | undefined;
   if (!s?.initialized) return;
   Object.assign(s, partial);
 }
 
 const innerGlowOpacityPercent = computed({
   get: () => Math.round((innerGlowState.value?.opacity ?? 0.5) * 100),
-  set: (v: number) => patchInnerGlow({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
+  set: (v: number) =>
+    patchInnerGlow({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
 });
 
 function onInnerGlowOpacityInput(e: Event) {
@@ -247,7 +257,8 @@ function onInnerGlowOpacityInput(e: Event) {
 
 const innerGlowChokePercent = computed({
   get: () => Math.round((innerGlowState.value?.choke ?? 0) * 100),
-  set: (v: number) => patchInnerGlow({ choke: Math.min(100, Math.max(0, v)) / 100 }),
+  set: (v: number) =>
+    patchInnerGlow({ choke: Math.min(100, Math.max(0, v)) / 100 }),
 });
 
 function onInnerGlowChokeInput(e: Event) {
@@ -255,20 +266,28 @@ function onInnerGlowChokeInput(e: Event) {
 }
 
 const outerGlowState = computed(
-  () => editorModel.value.effects[props.layer.id]?.outerGlow as OuterGlowEffectState | undefined,
+  () =>
+    editorModel.value.effects[props.layer.id]?.outerGlow as
+      | OuterGlowEffectState
+      | undefined,
 );
 
 function patchOuterGlow(
-  partial: Partial<Pick<OuterGlowEffectState, "color" | "opacity" | "spread" | "sizePx">>,
+  partial: Partial<
+    Pick<OuterGlowEffectState, "color" | "opacity" | "spread" | "sizePx">
+  >,
 ) {
-  const s = editorModel.value.effects[props.layer.id]?.outerGlow as OuterGlowEffectState | undefined;
+  const s = editorModel.value.effects[props.layer.id]?.outerGlow as
+    | OuterGlowEffectState
+    | undefined;
   if (!s?.initialized) return;
   Object.assign(s, partial);
 }
 
 const outerGlowOpacityPercent = computed({
   get: () => Math.round((outerGlowState.value?.opacity ?? 0.8) * 100),
-  set: (v: number) => patchOuterGlow({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
+  set: (v: number) =>
+    patchOuterGlow({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
 });
 
 function onOuterGlowOpacityInput(e: Event) {
@@ -277,7 +296,8 @@ function onOuterGlowOpacityInput(e: Event) {
 
 const outerGlowSpreadPercent = computed({
   get: () => Math.round((outerGlowState.value?.spread ?? 0) * 100),
-  set: (v: number) => patchOuterGlow({ spread: Math.min(100, Math.max(0, v)) / 100 }),
+  set: (v: number) =>
+    patchOuterGlow({ spread: Math.min(100, Math.max(0, v)) / 100 }),
 });
 
 function onOuterGlowSpreadInput(e: Event) {
@@ -285,35 +305,49 @@ function onOuterGlowSpreadInput(e: Event) {
 }
 
 const gradientOverlayState = computed(
-  () => editorModel.value.effects[props.layer.id]?.gradientOverlay as GradientOverlayEffectState | undefined,
+  () =>
+    editorModel.value.effects[props.layer.id]?.gradientOverlay as
+      | GradientOverlayEffectState
+      | undefined,
 );
 
 function patchGradientOverlay(
   partial: Partial<
-    Pick<GradientOverlayEffectState, "opacity" | "style" | "angle" | "scale" | "reverse" | "stops">
+    Pick<
+      GradientOverlayEffectState,
+      "opacity" | "style" | "angle" | "scale" | "reverse" | "stops"
+    >
   >,
 ) {
-  const s = editorModel.value.effects[props.layer.id]?.gradientOverlay as GradientOverlayEffectState | undefined;
+  const s = editorModel.value.effects[props.layer.id]?.gradientOverlay as
+    | GradientOverlayEffectState
+    | undefined;
   if (!s?.initialized) return;
   Object.assign(s, partial);
 }
 
 const gradientOverlayOpacityPercent = computed({
   get: () => Math.round((gradientOverlayState.value?.opacity ?? 0.9) * 100),
-  set: (v: number) => patchGradientOverlay({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
+  set: (v: number) =>
+    patchGradientOverlay({ opacity: Math.min(100, Math.max(0, v)) / 100 }),
 });
 
 function onGradientOverlayOpacityInput(e: Event) {
-  gradientOverlayOpacityPercent.value = Number((e.target as HTMLInputElement).value);
+  gradientOverlayOpacityPercent.value = Number(
+    (e.target as HTMLInputElement).value,
+  );
 }
 
 const gradientOverlayScalePercent = computed({
   get: () => Math.round((gradientOverlayState.value?.scale ?? 1) * 100),
-  set: (v: number) => patchGradientOverlay({ scale: Math.min(400, Math.max(10, v)) / 100 }),
+  set: (v: number) =>
+    patchGradientOverlay({ scale: Math.min(400, Math.max(10, v)) / 100 }),
 });
 
 function onGradientOverlayScaleInput(e: Event) {
-  gradientOverlayScalePercent.value = Number((e.target as HTMLInputElement).value);
+  gradientOverlayScalePercent.value = Number(
+    (e.target as HTMLInputElement).value,
+  );
 }
 
 const gradientOverlayPreviewCss = computed(() => {
@@ -328,11 +362,16 @@ function onGradientEditorApply(stops: GradientOverlayStop[]) {
 }
 
 const blurState = computed(
-  () => editorModel.value.effects[props.layer.id]?.blur as BlurEffectState | undefined,
+  () =>
+    editorModel.value.effects[props.layer.id]?.blur as
+      | BlurEffectState
+      | undefined,
 );
 
 function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
-  const s = editorModel.value.effects[props.layer.id]?.blur as BlurEffectState | undefined;
+  const s = editorModel.value.effects[props.layer.id]?.blur as
+    | BlurEffectState
+    | undefined;
   if (!s?.initialized) return;
   Object.assign(s, partial);
 }
@@ -343,26 +382,18 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
     ref="dialogRoot"
     class="layer-style-dialog"
     :class="{ 'shake-anim': isShaking }"
-    :style="{
-      left: `${editorModel.ui.layerStyleDialog.x}px`,
-      top: `${editorModel.ui.layerStyleDialog.y}px`,
-    }"
     @pointerdown.capture="onDialogPointerDown"
   >
-    <header
-      class="dialog-title-bar"
-      @pointerdown="onHeaderPointerDown"
-      @pointermove="onHeaderPointerMove"
-      @pointerup="onHeaderPointerUp"
-      @pointercancel="onHeaderPointerUp"
-    >
-      <span class="title-text">Layer Style</span>
+    <header class="dialog-title-bar">
+      <span class="title-text">Layer Styles</span>
     </header>
 
     <div class="dialog-body">
       <aside class="effects-column">
         <div class="effects-header">Styles</div>
-        <button type="button" class="pseudo-item" @click="noop">Blending Options…</button>
+        <button type="button" class="pseudo-item" @click="noop">
+          Blending Options…
+        </button>
         <div class="effects-divider" />
         <ul class="effects-list" role="list">
           <li
@@ -384,16 +415,28 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
         </ul>
         <div class="effects-divider" />
         <div class="effects-toolbar">
-          <button type="button" class="tb-btn" title="Add" @click="noop">fx</button>
-          <button type="button" class="tb-btn" title="Move up" @click="noop">▲</button>
-          <button type="button" class="tb-btn" title="Move down" @click="noop">▼</button>
-          <button type="button" class="tb-btn" title="Delete" @click="noop">🗑</button>
+          <button type="button" class="tb-btn" title="Add" @click="noop">
+            fx
+          </button>
+          <button type="button" class="tb-btn" title="Move up" @click="noop">
+            ▲
+          </button>
+          <button type="button" class="tb-btn" title="Move down" @click="noop">
+            ▼
+          </button>
+          <button type="button" class="tb-btn" title="Delete" @click="noop">
+            🗑
+          </button>
         </div>
       </aside>
 
       <main class="options-column">
         <!-- Stroke -->
-        <section id="layer-style-panel-stroke" v-show="selectedEffect === 'stroke'" class="effect-panel">
+        <section
+          id="layer-style-panel-stroke"
+          v-show="selectedEffect === 'stroke'"
+          class="effect-panel"
+        >
           <h2 class="panel-heading">Stroke</h2>
           <p v-if="!strokeState?.initialized" class="effect-hint">
             Check “Stroke” in the list to enable these options.
@@ -408,7 +451,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="64"
                 step="1"
                 :value="strokeState.sizePx"
-                @input="patchStroke({ sizePx: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchStroke({
+                    sizePx: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <input
                 class="field-num"
@@ -417,7 +464,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="256"
                 step="1"
                 :value="strokeState.sizePx"
-                @input="patchStroke({ sizePx: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchStroke({
+                    sizePx: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <span class="unit">px</span>
             </div>
@@ -428,7 +479,8 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 :value="strokeState.position"
                 @change="
                   patchStroke({
-                    position: ($event.target as HTMLSelectElement).value as StrokeEffectState['position'],
+                    position: ($event.target as HTMLSelectElement)
+                      .value as StrokeEffectState['position'],
                   })
                 "
               >
@@ -444,7 +496,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 class="color-input"
                 :value="strokeState.color"
                 title="Stroke color"
-                @input="patchStroke({ color: ($event.target as HTMLInputElement).value })"
+                @input="
+                  patchStroke({
+                    color: ($event.target as HTMLInputElement).value,
+                  })
+                "
               />
             </div>
             <div class="field-row">
@@ -469,7 +525,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
         </section>
 
         <!-- Inner Shadow -->
-        <section id="layer-style-panel-innerShadow" v-show="selectedEffect === 'innerShadow'" class="effect-panel">
+        <section
+          id="layer-style-panel-innerShadow"
+          v-show="selectedEffect === 'innerShadow'"
+          class="effect-panel"
+        >
           <h2 class="panel-heading">Inner Shadow</h2>
           <p v-if="!innerShadowState?.initialized" class="effect-hint">
             Check "Inner Shadow" in the list to enable these options.
@@ -482,7 +542,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 class="color-input"
                 :value="innerShadowState.color"
                 title="Inner shadow color"
-                @input="patchInnerShadow({ color: ($event.target as HTMLInputElement).value })"
+                @input="
+                  patchInnerShadow({
+                    color: ($event.target as HTMLInputElement).value,
+                  })
+                "
               />
             </div>
             <div class="field-row">
@@ -516,7 +580,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="360"
                 step="1"
                 :value="innerShadowState.angle"
-                @input="patchInnerShadow({ angle: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchInnerShadow({
+                    angle: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <span class="unit">°</span>
             </div>
@@ -529,7 +597,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="50"
                 step="1"
                 :value="innerShadowState.distancePx"
-                @input="patchInnerShadow({ distancePx: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchInnerShadow({
+                    distancePx: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <input
                 class="field-num"
@@ -538,7 +610,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="50"
                 step="1"
                 :value="innerShadowState.distancePx"
-                @input="patchInnerShadow({ distancePx: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchInnerShadow({
+                    distancePx: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <span class="unit">px</span>
             </div>
@@ -569,7 +645,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="50"
                 step="1"
                 :value="innerShadowState.sizePx"
-                @input="patchInnerShadow({ sizePx: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchInnerShadow({
+                    sizePx: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <input
                 class="field-num"
@@ -578,7 +658,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="50"
                 step="1"
                 :value="innerShadowState.sizePx"
-                @input="patchInnerShadow({ sizePx: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchInnerShadow({
+                    sizePx: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <span class="unit">px</span>
             </div>
@@ -586,7 +670,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
         </section>
 
         <!-- Inner Glow -->
-        <section id="layer-style-panel-innerGlow" v-show="selectedEffect === 'innerGlow'" class="effect-panel">
+        <section
+          id="layer-style-panel-innerGlow"
+          v-show="selectedEffect === 'innerGlow'"
+          class="effect-panel"
+        >
           <h2 class="panel-heading">Inner Glow</h2>
           <p v-if="!innerGlowState?.initialized" class="effect-hint">
             Check "Inner Glow" in the list to enable these options.
@@ -599,7 +687,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 class="color-input"
                 :value="innerGlowState.color"
                 title="Inner glow color"
-                @input="patchInnerGlow({ color: ($event.target as HTMLInputElement).value })"
+                @input="
+                  patchInnerGlow({
+                    color: ($event.target as HTMLInputElement).value,
+                  })
+                "
               />
             </div>
             <div class="field-row">
@@ -670,7 +762,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="50"
                 step="1"
                 :value="innerGlowState.sizePx"
-                @input="patchInnerGlow({ sizePx: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchInnerGlow({
+                    sizePx: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <input
                 class="field-num"
@@ -679,7 +775,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="50"
                 step="1"
                 :value="innerGlowState.sizePx"
-                @input="patchInnerGlow({ sizePx: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchInnerGlow({
+                    sizePx: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <span class="unit">px</span>
             </div>
@@ -687,7 +787,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
         </section>
 
         <!-- Color Overlay -->
-        <section id="layer-style-panel-colorOverlay" v-show="selectedEffect === 'colorOverlay'" class="effect-panel">
+        <section
+          id="layer-style-panel-colorOverlay"
+          v-show="selectedEffect === 'colorOverlay'"
+          class="effect-panel"
+        >
           <h2 class="panel-heading">Color Overlay</h2>
           <p v-if="!colorOverlayState?.initialized" class="effect-hint">
             Check “Color Overlay” in the list to enable these options.
@@ -700,7 +804,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 class="color-input"
                 :value="colorOverlayState.color"
                 title="Overlay color"
-                @input="patchColorOverlay({ color: ($event.target as HTMLInputElement).value })"
+                @input="
+                  patchColorOverlay({
+                    color: ($event.target as HTMLInputElement).value,
+                  })
+                "
               />
             </div>
             <div class="field-row">
@@ -725,7 +833,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
         </section>
 
         <!-- Gradient Overlay -->
-        <section id="layer-style-panel-gradientOverlay" v-show="selectedEffect === 'gradientOverlay'" class="effect-panel">
+        <section
+          id="layer-style-panel-gradientOverlay"
+          v-show="selectedEffect === 'gradientOverlay'"
+          class="effect-panel"
+        >
           <h2 class="panel-heading">Gradient Overlay</h2>
           <p v-if="!gradientOverlayState?.initialized" class="effect-hint">
             Check "Gradient Overlay" in the list to enable these options.
@@ -733,8 +845,15 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
           <template v-else>
             <div class="field-row block">
               <span class="field-label">Gradient:</span>
-              <div class="gradient-preview-bar" :style="{ background: gradientOverlayPreviewCss }" />
-              <button type="button" class="small-btn" @click="setGradientEditorOpen(true)">
+              <div
+                class="gradient-preview-bar"
+                :style="{ background: gradientOverlayPreviewCss }"
+              />
+              <button
+                type="button"
+                class="small-btn"
+                @click="setGradientEditorOpen(true)"
+              >
                 Edit Gradient…
               </button>
             </div>
@@ -763,7 +882,8 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 :value="gradientOverlayState.style"
                 @change="
                   patchGradientOverlay({
-                    style: ($event.target as HTMLSelectElement).value as GradientOverlayEffectState['style'],
+                    style: ($event.target as HTMLSelectElement)
+                      .value as GradientOverlayEffectState['style'],
                   })
                 "
               >
@@ -784,7 +904,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="360"
                 step="1"
                 :value="gradientOverlayState.angle"
-                @input="patchGradientOverlay({ angle: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchGradientOverlay({
+                    angle: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <span class="unit">°</span>
             </div>
@@ -812,7 +936,9 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                   type="checkbox"
                   :checked="gradientOverlayState.reverse"
                   @change="
-                    patchGradientOverlay({ reverse: ($event.target as HTMLInputElement).checked })
+                    patchGradientOverlay({
+                      reverse: ($event.target as HTMLInputElement).checked,
+                    })
                   "
                 />
                 Reverse
@@ -822,7 +948,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
         </section>
 
         <!-- Outer Glow -->
-        <section id="layer-style-panel-outerGlow" v-show="selectedEffect === 'outerGlow'" class="effect-panel">
+        <section
+          id="layer-style-panel-outerGlow"
+          v-show="selectedEffect === 'outerGlow'"
+          class="effect-panel"
+        >
           <h2 class="panel-heading">Outer Glow</h2>
           <p v-if="!outerGlowState?.initialized" class="effect-hint">
             Check "Outer Glow" in the list to enable these options.
@@ -835,7 +965,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 class="color-input"
                 :value="outerGlowState.color"
                 title="Outer glow color"
-                @input="patchOuterGlow({ color: ($event.target as HTMLInputElement).value })"
+                @input="
+                  patchOuterGlow({
+                    color: ($event.target as HTMLInputElement).value,
+                  })
+                "
               />
             </div>
             <div class="field-row">
@@ -883,7 +1017,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="50"
                 step="1"
                 :value="outerGlowState.sizePx"
-                @input="patchOuterGlow({ sizePx: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchOuterGlow({
+                    sizePx: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <input
                 class="field-num"
@@ -892,7 +1030,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="50"
                 step="1"
                 :value="outerGlowState.sizePx"
-                @input="patchOuterGlow({ sizePx: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchOuterGlow({
+                    sizePx: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <span class="unit">px</span>
             </div>
@@ -900,7 +1042,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
         </section>
 
         <!-- Drop Shadow -->
-        <section id="layer-style-panel-dropShadow" v-show="selectedEffect === 'dropShadow'" class="effect-panel">
+        <section
+          id="layer-style-panel-dropShadow"
+          v-show="selectedEffect === 'dropShadow'"
+          class="effect-panel"
+        >
           <h2 class="panel-heading">Drop Shadow</h2>
           <p v-if="!dropShadowState?.initialized" class="effect-hint">
             Check "Drop Shadow" in the list to enable these options.
@@ -913,7 +1059,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 class="color-input"
                 :value="dropShadowState.color"
                 title="Shadow color"
-                @input="patchDropShadow({ color: ($event.target as HTMLInputElement).value })"
+                @input="
+                  patchDropShadow({
+                    color: ($event.target as HTMLInputElement).value,
+                  })
+                "
               />
             </div>
             <div class="field-row">
@@ -947,7 +1097,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="360"
                 step="1"
                 :value="dropShadowState.angle"
-                @input="patchDropShadow({ angle: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchDropShadow({
+                    angle: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <span class="unit">°</span>
             </div>
@@ -960,7 +1114,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="50"
                 step="1"
                 :value="dropShadowState.distancePx"
-                @input="patchDropShadow({ distancePx: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchDropShadow({
+                    distancePx: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <input
                 class="field-num"
@@ -969,7 +1127,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="50"
                 step="1"
                 :value="dropShadowState.distancePx"
-                @input="patchDropShadow({ distancePx: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchDropShadow({
+                    distancePx: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <span class="unit">px</span>
             </div>
@@ -1000,7 +1162,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="50"
                 step="1"
                 :value="dropShadowState.sizePx"
-                @input="patchDropShadow({ sizePx: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchDropShadow({
+                    sizePx: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <input
                 class="field-num"
@@ -1009,7 +1175,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="50"
                 step="1"
                 :value="dropShadowState.sizePx"
-                @input="patchDropShadow({ sizePx: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchDropShadow({
+                    sizePx: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <span class="unit">px</span>
             </div>
@@ -1017,7 +1187,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
         </section>
 
         <!-- Blur -->
-        <section id="layer-style-panel-blur" v-show="selectedEffect === 'blur'" class="effect-panel">
+        <section
+          id="layer-style-panel-blur"
+          v-show="selectedEffect === 'blur'"
+          class="effect-panel"
+        >
           <h2 class="panel-heading">Blur</h2>
           <p v-if="!blurState?.initialized" class="effect-hint">
             Check "Blur" in the list to enable these options.
@@ -1032,7 +1206,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="50"
                 step="1"
                 :value="blurState.sizePx"
-                @input="patchBlur({ sizePx: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchBlur({
+                    sizePx: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <input
                 class="field-num"
@@ -1041,7 +1219,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
                 max="256"
                 step="1"
                 :value="blurState.sizePx"
-                @input="patchBlur({ sizePx: +($event.target as HTMLInputElement).value })"
+                @input="
+                  patchBlur({
+                    sizePx: +($event.target as HTMLInputElement).value,
+                  })
+                "
               />
               <span class="unit">px</span>
             </div>
@@ -1050,9 +1232,10 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
       </main>
 
       <aside class="actions-sidebar">
-        <button type="button" class="action-btn primary" @click="close">OK</button>
-        <button type="button" class="action-btn" @click="close">Cancel</button>
-        <button type="button" class="action-btn" @click="noop">New Style…</button>
+        <p class="live-edit-hint">Changes apply to the scene as you edit.</p>
+        <button type="button" class="action-btn" @click="noop">
+          New Style…
+        </button>
         <label class="preview-check">
           <input type="checkbox" checked disabled />
           Preview
@@ -1078,7 +1261,11 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
 <style scoped>
 .layer-style-dialog {
   position: fixed;
-  z-index: 20;
+  right: 20px;
+  bottom: 20px;
+  left: auto;
+  top: auto;
+  z-index: 25;
   width: 560px;
   max-height: 90vh;
   display: flex;
@@ -1112,13 +1299,8 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
   padding: 8px 10px;
   background: linear-gradient(180deg, #d8d8d8 0%, #b8b8b8 100%);
   border-bottom: 1px solid #6a6a6a;
-  cursor: grab;
-  touch-action: none;
+  cursor: default;
   min-width: 0;
-}
-
-.dialog-title-bar:active {
-  cursor: grabbing;
 }
 
 .dialog-body {
@@ -1137,7 +1319,7 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
 }
 
 .actions-sidebar {
-  flex: 0 0 100px;
+  flex: 0 0 108px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1145,6 +1327,14 @@ function patchBlur(partial: Partial<Pick<BlurEffectState, "sizePx">>) {
   background: #b8b8b8;
   border-left: 1px solid #8a8a8a;
   box-sizing: border-box;
+}
+
+.live-edit-hint {
+  margin: 0 0 4px;
+  font-size: 9px;
+  line-height: 1.3;
+  color: #2a2a2a;
+  text-align: center;
 }
 
 .action-btn {

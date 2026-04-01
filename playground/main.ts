@@ -46,11 +46,11 @@ const camera = new THREE.PerspectiveCamera(
   0.1,
   100,
 );
-camera.position.set(0.6, 0.6, 10.0);
+camera.position.set(-0.552, 2.168, 13.009);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = false;
-controls.target.set(0, 0.5, 0);
+controls.target.set(0, -1.204, 0);
 controls.update();
 
 const key = new THREE.DirectionalLight(0xffffff, 2);
@@ -112,28 +112,30 @@ new GLTFLoader().load(
   },
 );
 
-const sphereMat = new THREE.MeshStandardNodeMaterial({
+const orbitObjectMat = new THREE.MeshStandardNodeMaterial({
   color: new THREE.Color(0xffffff),
   metalness: 0.1,
   roughness: 0.55,
 });
 const sphereGeo = new THREE.SphereGeometry(0.28, 32, 32);
-const sphereA = new THREE.Mesh(sphereGeo, sphereMat);
-const sphereB = new THREE.Mesh(sphereGeo, sphereMat);
+/** Cube edge ≈ sphere diameter so silhouette is similar. */
+const boxGeo = new THREE.BoxGeometry(0.56, 0.56, 0.56);
+const sphereMesh = new THREE.Mesh(sphereGeo, orbitObjectMat);
+const boxMesh = new THREE.Mesh(boxGeo, orbitObjectMat);
 
-const groupA = new EffectsGroup();
-groupA.debug = true;
-groupA.debugColor.set(0xff6600);
-groupA.paddingExtra = 0;
-groupA.add(sphereA);
-scene.add(groupA);
+const sphereGroup = new EffectsGroup();
+sphereGroup.debug = true;
+sphereGroup.debugColor.set(0xff6600);
+sphereGroup.paddingExtra = 0;
+sphereGroup.add(sphereMesh);
+scene.add(sphereGroup);
 
-const groupB = new EffectsGroup();
-groupB.debug = true;
-groupB.debugColor.set(0xff0066);
-groupB.paddingExtra = 0;
-groupB.add(sphereB);
-scene.add(groupB);
+const boxGroup = new EffectsGroup();
+boxGroup.debug = true;
+boxGroup.debugColor.set(0xff0066);
+boxGroup.paddingExtra = 0;
+boxGroup.add(boxMesh);
+scene.add(boxGroup);
 
 function makeLabel(text: string, bgHex: number): THREE.Mesh {
   const labelH = 80,
@@ -172,13 +174,13 @@ function makeLabel(text: string, bgHex: number): THREE.Mesh {
 }
 
 cubeGroup.debugGroup.add(makeLabel("duck", 0x00aa44));
-groupA.debugGroup.add(makeLabel("sphere A", 0xff6600));
-groupB.debugGroup.add(makeLabel("sphere B", 0xff0066));
+sphereGroup.debugGroup.add(makeLabel("sphere", 0xff6600));
+boxGroup.debugGroup.add(makeLabel("box", 0xff0066));
 
 const layerObjects: Record<string, EffectsGroup> = {
   group: cubeGroup,
-  groupA,
-  groupB,
+  groupA: sphereGroup,
+  groupB: boxGroup,
 };
 
 function syncEditorToGroupEffects() {
@@ -209,6 +211,9 @@ function syncEditorToGroupEffects() {
       | undefined;
 
     const layerRow = editorModel.value.layers.find((l) => l.id === layerId);
+    if (layerRow) {
+      g.visible = layerRow.visible;
+    }
 
     g.applyEffects((e: GroupEffects) => {
       if (layerRow) {
@@ -338,16 +343,19 @@ renderer.setAnimationLoop((time) => {
 
   const orbitR = 2;
   const orbitY = 0.8;
-  groupA.position.set(
+  sphereGroup.position.set(
     Math.cos(t * 0.9) * orbitR,
     orbitY + Math.sin(t * 0.7) * 0.25,
     Math.sin(t * 0.9) * orbitR,
   );
-  groupB.position.set(
+  boxGroup.position.set(
     Math.cos(t * 0.9 + Math.PI) * orbitR,
     orbitY + Math.sin(t * 0.7 + Math.PI) * 0.25,
     Math.sin(t * 0.9 + Math.PI) * orbitR,
   );
+
+  boxMesh.rotation.x = t * 0.85;
+  boxMesh.rotation.y = t * 1.1;
 
   controls.update();
   preRenderEffects(renderer, scene, camera);
