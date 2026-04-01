@@ -49,11 +49,11 @@ const camera = new THREE.PerspectiveCamera(
 camera.position.set(-0.552, 2.168, 13.009);
 
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = false;
+controls.enableDamping = true;
 controls.target.set(0, -1.204, 0);
 controls.update();
 
-const key = new THREE.DirectionalLight(0xffffff, 2);
+const key = new THREE.DirectionalLight(0xffffff, 3.5);
 key.position.set(2.5, 4, 3);
 scene.add(key);
 scene.add(new THREE.AmbientLight(0xffffff, 0.28));
@@ -85,7 +85,7 @@ function applyEmissiveFromMap(root: THREE.Object3D) {
       const std = m as THREE.MeshStandardMaterial;
       std.emissiveMap = std.map;
       std.emissive.set(0xffffff);
-      std.emissiveIntensity = 0.5;
+      std.emissiveIntensity = 0.8;
     }
   });
 }
@@ -137,10 +137,10 @@ boxGroup.paddingExtra = 0;
 boxGroup.add(boxMesh);
 scene.add(boxGroup);
 
-function makeLabel(text: string, bgHex: number): THREE.Mesh {
-  const labelH = 80,
-    PAD = 20;
-  const FONT = "bold 34px monospace";
+function makeLabel(text: string, borderColor: THREE.Color): THREE.Mesh {
+  const labelH = 66,
+    PAD = 16;
+  const FONT = "bold 28px monospace";
   const measure = document.createElement("canvas").getContext("2d")!;
   measure.font = FONT;
   const W = Math.ceil(measure.measureText(text).width) + PAD * 2;
@@ -148,19 +148,21 @@ function makeLabel(text: string, bgHex: number): THREE.Mesh {
   canvas.width = W;
   canvas.height = labelH;
   const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = `#${bgHex.toString(16).padStart(6, "0")}`;
+  /** Same hex as {@link EffectsGroup.debugColor} / debug border (Three `Color#getHexString`). */
+  ctx.fillStyle = `#${borderColor.getHexString()}`;
   ctx.fillRect(0, 0, W, labelH);
   ctx.fillStyle = "#ffffff";
   ctx.font = FONT;
-  ctx.fillText(text, PAD, 54);
+  ctx.fillText(text, PAD, 45);
   const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
   const mat = new THREE.MeshBasicNodeMaterial({
     transparent: true,
     depthTest: false,
     side: 2,
   });
   mat.colorNode = tslTexture(tex);
-  const h = 50;
+  const h = 41;
   const mesh = new THREE.Mesh(
     new THREE.PlaneGeometry(h * (W / labelH), h),
     mat,
@@ -173,9 +175,9 @@ function makeLabel(text: string, bgHex: number): THREE.Mesh {
   return mesh;
 }
 
-cubeGroup.debugGroup.add(makeLabel("duck", 0x00aa44));
-sphereGroup.debugGroup.add(makeLabel("sphere", 0xff6600));
-boxGroup.debugGroup.add(makeLabel("box", 0xff0066));
+cubeGroup.debugGroup.add(makeLabel("duck", cubeGroup.debugColor));
+sphereGroup.debugGroup.add(makeLabel("sphere", sphereGroup.debugColor));
+boxGroup.debugGroup.add(makeLabel("box", boxGroup.debugColor));
 
 const layerObjects: Record<string, EffectsGroup> = {
   group: cubeGroup,
@@ -345,17 +347,17 @@ renderer.setAnimationLoop((time) => {
   const orbitY = 0.8;
   sphereGroup.position.set(
     Math.cos(t * 0.9) * orbitR,
-    orbitY + Math.sin(t * 0.7) * 0.25,
+    orbitY + Math.sin(t * 0.2) * 0.25,
     Math.sin(t * 0.9) * orbitR,
   );
   boxGroup.position.set(
     Math.cos(t * 0.9 + Math.PI) * orbitR,
-    orbitY + Math.sin(t * 0.7 + Math.PI) * 0.25,
+    orbitY + Math.sin(t * 0.2 + Math.PI) * 0.25,
     Math.sin(t * 0.9 + Math.PI) * orbitR,
   );
 
-  boxMesh.rotation.x = t * 0.85;
-  boxMesh.rotation.y = t * 1.1;
+  boxMesh.rotation.x = t * 0.25;
+  boxMesh.rotation.y = t * 0.8;
 
   controls.update();
   preRenderEffects(renderer, scene, camera);
