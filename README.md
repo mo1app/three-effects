@@ -273,6 +273,18 @@ Optional top-level field **`g.effects.quality`**: **`"fast"`** | **`"high"`**. I
 | `enabled` | `boolean` | Layer-wide multiply on RGBA after other styles.     |
 | `value`   | `number`  | `0…1`. Updates without shader rebuild when enabled. |
 
+## Publishing
+
+Always use the npm script so **tests run before** the package is uploaded (`prepublishOnly` still runs **`npm run build`** automatically):
+
+```bash
+npm version patch   # or minor / major — updates package.json, commit + git tag
+npm run publish:npm # same as: npm test && npm publish
+git push && git push origin --tags
+```
+
+Do **not** run bare `npm publish`; use **`npm run publish:npm`** every time.
+
 ## License
 
 MIT
