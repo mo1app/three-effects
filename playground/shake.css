@@ -29,3 +29,25 @@
 .shake-anim {
   animation: shake-panel 0.45s ease;
 }
+
+/**
+ * Big interactive regions (panels, chrome). Pair with `useShake()` and
+ * `.playground-interactive--hint` for post-shake focus.
+ */
+.playground-interactive {
+  transition:
+    outline-color 0.35s ease,
+    outline-width 0.35s ease,
+    box-shadow 0.35s ease;
+}
+
+.playground-interactive.playground-interactive--hint {
+  position: relative;
+  z-index: 10;
+  /* Inner blue ring; thicker white ring behind (larger spread); soft blue glow. */
+  outline: none;
+  box-shadow:
+    0 0 0 2px #007aff,
+    0 0 0 6px #fff,
+    0 8px 28px rgba(0, 122, 255, 0.22);
+}

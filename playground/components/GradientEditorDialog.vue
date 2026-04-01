@@ -152,7 +152,7 @@ function cancel() {
       @pointerdown.self="cancel"
     >
       <div
-        class="gradient-editor"
+        class="gradient-editor playground-interactive"
         :style="{
           left: `${editorModel.ui.gradientEditor.x}px`,
           top: `${editorModel.ui.gradientEditor.y}px`,

@@ -117,7 +117,7 @@ const orbitObjectMat = new THREE.MeshStandardNodeMaterial({
   metalness: 0.1,
   roughness: 0.55,
 });
-const sphereGeo = new THREE.SphereGeometry(0.28, 32, 32);
+const sphereGeo = new THREE.SphereGeometry(0.4, 32, 32);
 /** Cube edge ≈ sphere diameter so silhouette is similar. */
 const boxGeo = new THREE.BoxGeometry(0.56, 0.56, 0.56);
 const sphereMesh = new THREE.Mesh(sphereGeo, orbitObjectMat);
@@ -329,13 +329,24 @@ watch(
   { immediate: true },
 );
 
+/** View-offset X: 0 at this width and above; below, lerp 0 → -0.25×width as width → 0. */
+const VIEW_OFFSET_X_BREAKPOINT = 1000;
+
+function viewOffsetX(w: number): number {
+  if (w >= VIEW_OFFSET_X_BREAKPOINT) return 0;
+  const t = 1 - w / VIEW_OFFSET_X_BREAKPOINT;
+  return t * (-0.6 * w);
+}
+
 function onResize() {
   const w = window.innerWidth;
   const h = window.innerHeight;
   camera.aspect = w / h;
+  camera.setViewOffset(w, h, viewOffsetX(w), 0.05 * h, w, h);
   camera.updateProjectionMatrix();
   renderer.setSize(w, h);
 }
+onResize();
 window.addEventListener("resize", onResize);
 
 renderer.setAnimationLoop((time) => {

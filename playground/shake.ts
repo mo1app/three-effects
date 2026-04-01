@@ -1,24 +1,41 @@
-import { nextTick, ref } from "vue";
+import { nextTick, onUnmounted, ref } from "vue";
 
 const SHAKE_MS = 450;
+/** Outline / glow on `.playground-interactive` after shake ends. */
+const POST_SHAKE_HINT_MS = 1400;
 
 export function useShake() {
   const isShaking = ref(false);
+  const isInteractiveHint = ref(false);
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let hintTimer: ReturnType<typeof setTimeout> | null = null;
 
   function triggerShake() {
     if (timer) clearTimeout(timer);
+    if (hintTimer) clearTimeout(hintTimer);
+    hintTimer = null;
     isShaking.value = false;
+    isInteractiveHint.value = false;
     nextTick(() => {
       isShaking.value = true;
       timer = setTimeout(() => {
         isShaking.value = false;
         timer = null;
+        isInteractiveHint.value = true;
+        hintTimer = setTimeout(() => {
+          isInteractiveHint.value = false;
+          hintTimer = null;
+        }, POST_SHAKE_HINT_MS);
       }, SHAKE_MS);
     });
   }
 
-  return { isShaking, triggerShake };
+  onUnmounted(() => {
+    if (timer) clearTimeout(timer);
+    if (hintTimer) clearTimeout(hintTimer);
+  });
+
+  return { isShaking, isInteractiveHint, triggerShake };
 }
 
 /**

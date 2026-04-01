@@ -23,7 +23,7 @@ function toggleVisibility(id: string) {
   props.toggleLayerVisibility?.(id);
 }
 
-const { isShaking, triggerShake } = useShake();
+const { isShaking, isInteractiveHint, triggerShake } = useShake();
 const panelRoot = ref<HTMLElement | null>(null);
 
 watch(
@@ -46,6 +46,15 @@ function onPanelPointerDown(e: PointerEvent) {
   const root = panelRoot.value;
   if (!root) return;
   if (pointerHitsDisabledFormControl(root, e.clientX, e.clientY)) {
+    triggerShake();
+    return;
+  }
+  const t = e.target as HTMLElement | null;
+  if (
+    t &&
+    t.closest(".panel-header") &&
+    !t.closest(".helpers-btn")
+  ) {
     triggerShake();
   }
 }
@@ -185,7 +194,10 @@ onUnmounted(() => {
   <div
     ref="panelRoot"
     class="layers-panel"
-    :class="{ 'shake-anim': isShaking }"
+    :class="{
+      'shake-anim': isShaking,
+      'layers-panel--hint-on-top': isInteractiveHint,
+    }"
     @pointerdown.capture="onPanelPointerDown"
   >
     <header class="panel-header">
@@ -208,6 +220,10 @@ onUnmounted(() => {
         <option>Multiply</option>
         <option>Screen</option>
       </select>
+      <div
+        class="opacity-highlight-wrap playground-interactive"
+        :class="{ 'playground-interactive--hint': isInteractiveHint }"
+      >
       <div class="opacity-row opacity-row-wrap">
         <label class="opacity-checkbox-label">
           <input
@@ -258,6 +274,7 @@ onUnmounted(() => {
           />
         </div>
       </div>
+      </div>
     </div>
 
     <div class="lock-row">
@@ -274,7 +291,11 @@ onUnmounted(() => {
       <button type="button" class="arrow-btn" title="Slider" @click="noop">▾</button>
     </div>
 
-    <div class="layer-list" role="list">
+    <div
+      class="layer-list playground-interactive"
+      :class="{ 'playground-interactive--hint': isInteractiveHint }"
+      role="list"
+    >
       <div
         v-for="(layer, i) in props.layers"
         :key="layer.id"
@@ -381,6 +402,10 @@ onUnmounted(() => {
     0 2px 8px rgba(0, 0, 0, 0.35),
     inset 0 1px 0 rgba(255, 255, 255, 0.25);
   user-select: none;
+}
+
+.layers-panel.layers-panel--hint-on-top {
+  z-index: 30;
 }
 
 .panel-header {

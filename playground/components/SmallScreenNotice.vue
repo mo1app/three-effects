@@ -4,7 +4,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 const STORAGE_KEY = "three-effects-playground-small-screen-dismiss";
 
 /** Match fixed panels + margins (~240 + 560 + padding). Short viewports hide vertical space for the stack. */
-const QUERY = "(max-width: 900px), (max-height: 520px)";
+const QUERY = "(max-width: 300px), (max-height: 520px)";
 
 const mqSupported = typeof window !== "undefined" && "matchMedia" in window;
 const mq = mqSupported ? window.matchMedia(QUERY) : null;

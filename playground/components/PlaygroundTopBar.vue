@@ -4,7 +4,7 @@ const NPM_URL = "https://www.npmjs.com/package/three-effects";
 </script>
 
 <template>
-  <header class="playground-top-bar" aria-label="Playground">
+  <header class="playground-top-bar playground-interactive" aria-label="Playground">
     <span class="app-title">three-effects</span>
     <nav class="bar-links" aria-label="Project links">
       <a :href="GITHUB_URL" target="_blank" rel="noopener noreferrer">GitHub repo</a>
