@@ -8,6 +8,7 @@ import {
   Vector2,
   Vector3,
   Vector4,
+  Matrix4,
   RenderTarget,
   HalfFloatType,
   LinearFilter,
@@ -63,6 +64,10 @@ const _billboardLocalQ = new Quaternion();
 const _rendererSize = new Vector2();
 const _savedClearColor = new Color();
 const _savedViewport = new Vector4();
+const _wpp0 = new Vector3();
+const _wpp1 = new Vector3();
+/** Clip-space map: main-camera NDC bbox → full RT NDC (supports main `setViewOffset`). */
+const _cropClip = new Matrix4();
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
@@ -369,6 +374,22 @@ export class GroupRaw extends ThreeGroup {
    * axis-aligned bounds (same center used for {@link _computeNDCBounds} `ndcZ`).
    * Used to convert screen-pixel margins to NDC {@link padding} at the content depth.
    */
+  /**
+   * World-space distance between two NDC points separated by one physical pixel
+   * in Y at the given NDC depth. Matches {@link PerspectiveCamera.setViewOffset}
+   * (unlike `tan(fov/2) / pixelHeight`, which assumes an uncropped frustum).
+   */
+  protected _worldUnitsPerPixelY(
+    camera: PerspectiveCamera,
+    ndcZ: number,
+    fullH: number,
+  ): number {
+    if (fullH <= 0) return 0;
+    _wpp0.set(0, 0, ndcZ).unproject(camera);
+    _wpp1.set(0, 2 / fullH, ndcZ).unproject(camera);
+    return _wpp0.distanceTo(_wpp1);
+  }
+
   protected _getContentWorldCenterDistance(
     camera: PerspectiveCamera,
   ): number | null {
@@ -496,12 +517,13 @@ export class GroupRaw extends ThreeGroup {
 
       // World units per screen pixel at the plane's depth
       const r = renderer as unknown as RendererLike;
-      const dist = _wDebug.distanceTo(camera.position);
       r.getSize(_rendererSize);
-      const fovRad = (camera as PerspectiveCamera).fov * (Math.PI / 180);
-      const wpp =
-        (2 * dist * Math.tan(fovRad * 0.5)) /
-        (_rendererSize.y * r.getPixelRatio());
+      const fullH = _rendererSize.y * r.getPixelRatio();
+      const wpp = this._worldUnitsPerPixelY(
+        camera as PerspectiveCamera,
+        ndcZ,
+        fullH,
+      );
 
       // Scale debugGroup so 1 local unit = 1 screen pixel, distance-independent
       this.debugGroup.scale.set(
@@ -767,20 +789,28 @@ export class GroupRaw extends ThreeGroup {
       }
     });
 
-    // Sync the internal camera from the main camera so the scene renders from
-    // the same viewpoint. Main camera is never modified — no restore needed.
+    // Internal capture: same world pose and the **same** projection as the main
+    // camera (including `setViewOffset`), then a clip-space zoom so the bbox
+    // pixel rect fills the cropW×cropH RT. Replacing this with
+    // `clearViewOffset` + `setViewOffset(fullW,…)` breaks when the main camera
+    // already uses view offset — that path assumed an uncropped base frustum.
     const ic = this._internalCamera;
     ic.fov = camera.fov;
     ic.aspect = camera.aspect;
     ic.near = camera.near;
     ic.far = camera.far;
     ic.zoom = camera.zoom ?? 1;
-    ic.view = camera.view ? { ...camera.view } : null;
+    ic.coordinateSystem = camera.coordinateSystem;
+    ic.view = null;
     ic.matrixWorld.copy(camera.matrixWorld);
     ic.matrixWorldInverse.copy(camera.matrixWorldInverse);
-    // setViewOffset zooms the projection into the bbox pixel region,
-    // filling the cropW×cropH target at full resolution.
-    ic.setViewOffset(fullW, fullH, pxMinX, pxMinY, cropW, cropH);
+    const ax = 2 / visNdcW;
+    const ay = 2 / visNdcH;
+    const bx = (-2 * visNdcMinX) / visNdcW - 1;
+    const by = (-2 * visNdcMinY) / visNdcH - 1;
+    _cropClip.set(ax, 0, 0, bx, 0, ay, 0, by, 0, 0, 1, 0, 0, 0, 0, 1);
+    ic.projectionMatrix.multiplyMatrices(_cropClip, camera.projectionMatrix);
+    ic.projectionMatrixInverse.copy(ic.projectionMatrix).invert();
     ic.layers.mask = 1 << SHARED_LAYER;
 
     const savedTarget = renderer.getRenderTarget();
