@@ -1,6 +1,6 @@
 {
   "name": "three-effects",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Photoshop-style layer effects (drop shadow, stroke, glows, overlays) for Three.js WebGPU + TSL.",
   "type": "module",
   "main": "./dist/index.cjs",

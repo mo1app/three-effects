@@ -8,7 +8,7 @@ Add Photoshop-style **layer effects** to [Three.js](https://threejs.org/) object
 
 ## Quick start
 
-1. User **`Group`** from **`three-effects`** as a **`THREE.Group`** replacement.
+1. Use **`Group`** from **`three-effects`** as a **`THREE.Group`** replacement.
 2. Configure the **`group.effects`**: each effect block needs to be manually **`enabled`**, and exposes parameters to be adjusted (see all below).
 3. Call **`preRenderEffects(renderer, scene, camera)`** once **before** **`renderer.render(scene, camera)`** each frame.
 
